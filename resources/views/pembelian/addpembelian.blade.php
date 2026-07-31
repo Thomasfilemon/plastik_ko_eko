@@ -288,6 +288,67 @@
     </div>
 </div>
 
+<!-- Edit Item Modal -->
+<div class="modal fade" id="editItemModal" tabindex="-1" role="dialog" aria-labelledby="editItemModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editItemModalLabel">Edit Barang</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit_item_index">
+                <div class="form-group">
+                    <label>Nama Barang</label>
+                    <input type="text" class="form-control" id="edit_item_nama">
+                </div>
+                <div class="row">
+                    <div class="col-md-6 form-group">
+                        <label>Qty</label>
+                        <input type="number" class="form-control" id="edit_item_qty" step="0.01" min="0.01">
+                    </div>
+                    <div class="col-md-6 form-group">
+                        <label>Harga Beli</label>
+                        <input type="number" class="form-control" id="edit_item_harga" step="0.01" min="0">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 form-group">
+                        <label>Satuan Kecil</label>
+                        <input type="text" class="form-control" id="edit_item_satuan_kecil" readonly>
+                    </div>
+                    <div class="col-md-6 form-group">
+                        <label>Satuan Besar</label>
+                        <select class="form-control" id="edit_item_satuan_besar"></select>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 form-group">
+                        <label>Diskon (%)</label>
+                        <input type="number" class="form-control" id="edit_item_diskon" min="0" max="100">
+                    </div>
+                    <div class="col-md-6 form-group">
+                        <label>Panjang</label>
+                        <input type="number" class="form-control" id="edit_item_panjang" step="0.01">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Keterangan</label>
+                    <input type="text" class="form-control" id="edit_item_keterangan">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="saveEditItemBtn">
+                    <i class="fas fa-save mr-1"></i> Simpan Perubahan
+                </button>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Tutup</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Kode Barang Search Modal -->
 <div class="modal fade" id="kodeBarangSearchModal" tabindex="-1" role="dialog" aria-labelledby="kodeBarangSearchModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg" role="document">

@@ -10,12 +10,15 @@ class RedirectIfNotAuthenticated
 {
     public function handle(Request $request, Closure $next)
     {
-        // Allow access to login page without authentication
-        if (!Auth::check() && !$request->is('signin')) {
+        // Public auth pages/actions — do not redirect these
+        if ($request->is('signin', 'login', 'logout')) {
+            return $next($request);
+        }
+
+        if (!Auth::check()) {
             return redirect()->route('signin');
         }
 
         return $next($request);
     }
 }
-

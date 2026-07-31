@@ -9,43 +9,48 @@ use Riskihajar\Terbilang\Facades\Terbilang;
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nota Pembelian #{{ $purchase->nota }}</title>
     <style>
+        /* Epson LX-310 continuous form (Half Letter) */
         * { box-sizing: border-box; }
 
         @page {
-            /* Half Letter size */
-            size: 21.59cm 13.97cm;
-            margin: 0mm;
+            size: 215.9mm 139.7mm;
+            /* 5mm top so printer feed does not cut the header */
+            margin: 5mm 4mm 2mm 4mm;
         }
-        
-        body {
-            font-family: 'Courier New', monospace; 
-            font-size: 9pt;
-            line-height: 1.2;
-            color: #000;
+
+        html, body {
+            width: 215.9mm;
+            height: 139.7mm;
             margin: 0;
             padding: 0;
-            display: flex;
-            flex-direction: column;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            font-size: 10pt;
+            line-height: 1.15;
+            color: #000;
+            display: block;
         }
 
         .page {
-            width: 95%;
-            margin: 0 auto; /* Center the page */
-            padding: 8mm 5mm 5mm 5mm; 
-            display: flex;
-            flex-direction: column;
-            flex-grow: 1;
+            width: 100%;
+            height: auto;
+            min-height: 0;
+            padding: 0 1mm;
+            margin: 0 auto;
+            display: block;
         }
 
-        .header { text-align: center; line-height: 1.1; }
-        .header strong { font-size: 10pt; }
+        .header { text-align: center; line-height: 1.15; }
+        .header strong { font-size: 11pt; }
 
         .info-row { display: flex; justify-content: space-between; margin-bottom: 2px; font-size: 9pt; }
-        
+
         .status-badge {
             font-size: 8pt;
-            padding: 1px 4px;
-            margin-top: 2px;
+            padding: 1px 3px;
+            margin-top: 1px;
             border: 1px solid #000;
             display: inline-block;
             font-weight: bold;
@@ -55,73 +60,75 @@ use Riskihajar\Terbilang\Facades\Terbilang;
             color: #cc0000;
         }
 
-        .item-table { width: 100%; border-collapse: collapse; margin-top: 5px; table-layout: fixed; }
-        .item-table th, 
-        .item-table td { border: 1px solid #000; padding: 2px 3px; font-size: 8pt; vertical-align: top; word-wrap: break-word; }
-        .item-table th { font-weight: bold; }
-        
-        /* Style for the empty rows to fill space */
-        tr.empty-row td {
-            border-bottom: 1px solid #eee; /* Light border for empty rows */
-            border-top: 1px solid #eee;
-            color: #fff; /* Hide any content like &nbsp; */
+        .item-table { width: 100%; border-collapse: collapse; margin-top: 2px; table-layout: fixed; }
+        .item-table th,
+        .item-table td {
+            border: 1px solid #000;
+            padding: 1.2mm 1.2mm;
+            font-size: 9pt;
+            vertical-align: middle;
+            word-wrap: break-word;
         }
-        /* Keep the left and right borders solid black to match the table frame */
+        .item-table th { font-weight: bold; text-align: center; }
+
+        tr.empty-row td {
+            border-bottom: 1px solid #eee;
+            border-top: 1px solid #eee;
+            color: #fff;
+            height: 6mm;
+        }
         tr.empty-row td:first-child { border-left: 1px solid #000; }
         tr.empty-row td:last-child { border-right: 1px solid #000; }
-        tr.last-empty-row td { border-bottom: 1px solid #000; } /* Bottom border for the very last row */
-
+        tr.last-empty-row td { border-bottom: 1px solid #000; }
 
         .footer-container {
             width: 100%;
-            margin-top: auto; /* Pushes the footer to the bottom */
-            padding-top: 5px;
+            margin-top: 1.5mm;
+            padding-top: 1mm;
         }
 
         .summary-table {
-            float: left; /* Position the totals table to the right */
-            width: 100%; /* Assign a width to the totals table */
+            width: 100%;
             border-collapse: collapse;
-            font-size: 8pt;
-            margin-bottom: 5px;
+            font-size: 9pt;
+            margin-bottom: 2px;
         }
-        .summary-table th, .summary-table td { border: 1px solid #000; padding: 2px 3px; }
+        .summary-table th, .summary-table td { border: 1px solid #000; padding: 1mm 1.5mm; }
         .summary-table th { text-align: left; font-weight: bold; }
-        
-        /* New wrapper for notes and terbilang */
+
         .notes-terbilang-wrapper {
             display: flex;
             justify-content: space-between;
-            align-items: flex-end; /* Aligns items to the bottom */
+            align-items: flex-end;
             width: 100%;
-            clear: both; /* Clear the float from the summary table */
-            padding-top: 3px;
+            clear: both;
+            padding-top: 2px;
         }
 
         .notes-section {
-            flex-basis: 60%; /* Adjust width as needed */
-            font-size: 8pt;
-            line-height: 1.1;
+            flex-basis: 60%;
+            font-size: 8.5pt;
+            line-height: 1.15;
         }
-        
+
         .terbilang-section {
-            flex-basis: 40%; /* Adjust width as needed */
-            font-size: 8pt;
+            flex-basis: 40%;
+            font-size: 8.5pt;
             font-style: italic;
             text-align: right;
-            padding-left: 10px;
+            padding-left: 6px;
         }
-        
+
         .signature-row {
             width: 100%;
-            overflow: hidden; /* Clearfix for floats */
-            margin-top: 35px; 
+            overflow: hidden;
+            margin-top: 4mm;
             font-size: 9pt;
         }
-        .signature-left { float: left; text-align: center; }
-        .signature-right { float: right; text-align: center; }
+        .signature-left { float: left; text-align: center; width: 28%; }
+        .signature-right { float: right; text-align: center; width: 28%; }
 
-        .edit-info-box { font-size: 7px; margin-top: 8px; padding: 3px; border: 1px solid #ccc; line-height: 1.1; clear: both; }
+        .edit-info-box { font-size: 7pt; margin-top: 2mm; padding: 2px; border: 1px solid #ccc; line-height: 1.1; clear: both; }
 
         .right { text-align: right; }
         .center { text-align: center; }
@@ -129,10 +136,19 @@ use Riskihajar\Terbilang\Facades\Terbilang;
         .no-print { position: fixed; top: 10px; right: 10px; z-index: 999; }
         .no-print button, .no-print a { margin-left: 8px; padding: 6px 16px; font-size: 14px; border: none; border-radius: 4px; background: #007bff; color: #fff; cursor: pointer; text-decoration: none; }
         .no-print a { background: #6c757d; }
-        
-        .page-break { page-break-after: always; }
-        
-        @media print { .no-print { display: none !important; } }
+
+        .page-break { page-break-after: always; break-after: page; }
+
+        @media print {
+            .no-print { display: none !important; }
+            html, body { width: 215.9mm; height: auto; }
+            .page {
+                height: auto;
+                min-height: 0;
+                max-width: none;
+                padding: 0 1mm;
+            }
+        }
     </style>
 </head>
 <body>
@@ -187,14 +203,11 @@ use Riskihajar\Terbilang\Facades\Terbilang;
             <thead>
                 <tr>
                     <th style="width: 5%;">No.</th>
-                    <th style="width: 14%;">Kode Barang</th>
-                    <th style="width: 28%;">Nama Barang</th>
-                    <th style="width: 7%;">Qty</th>
-                    <th style="width: 6%;">Satuan</th>
-                    <th style="width: 14%;">Harga Satuan</th>
-                    <th style="width: 8%;">Disc %</th>
-                    <th style="width: 9%;">Disc Rp</th>
-                    <th style="width: 9%;">Sub Total</th>
+                    <th style="width: 32%;">Nama Barang</th>
+                    <th style="width: 15%;">Satuan Besar</th>
+                    <th style="width: 16%;">Kuantiti</th>
+                    <th style="width: 16%;">Harga @</th>
+                    <th style="width: 16%;">Jumlah</th>
                 </tr>
             </thead>
             <tbody>
@@ -203,24 +216,28 @@ use Riskihajar\Terbilang\Facades\Terbilang;
                     @php $rowCount++; @endphp
                     <tr>
                         <td class="center">{{ (($pageNum - 1) * $itemsPerPage) + $i + 1 }}</td>
-                        <td>{{ $item->kode_barang }}</td>
                         <td>{{ $item->nama_barang }}</td>
-                        <td class="center">{{ $item->qty }}</td>
-                        <td class="center">{{ $item->satuan ?? '-' }}</td>
-                        <td class="right">Rp {{ number_format($item->harga, 0, ',', '.') }}</td>
-                        <td class="center">{{ $item->diskon ?? 0 }}</td>
-                        <td class="right">Rp {{ number_format(($item->harga * $item->qty * ($item->diskon ?? 0) / 100), 0, ',', '.') }}</td>
-                        <td class="right">Rp {{ number_format($item->total, 0, ',', '.') }}</td>
+                        <td class="center">
+                            @if(!empty($item->satuan_besar))
+                                {{ rtrim(rtrim(number_format($item->qty_besar, 2, '.', ''), '0'), '.') }} {{ $item->satuan_besar }}
+                            @else
+                                -
+                            @endif
+                        </td>
+                        <td class="center">
+                            {{ rtrim(rtrim(number_format($item->qty, 2, '.', ''), '0'), '.') }} {{ $item->satuan ?? '-' }}
+                        </td>
+                        <td class="center">Rp {{ number_format($item->harga, 0, ',', '.') }}</td>
+                        <td class="center">Rp {{ number_format($item->total, 0, ',', '.') }}</td>
                     </tr>
                 @endforeach
                 
                 {{-- Add empty rows to fill the table on the last page --}}
                 @if ($loop->last)
                     @for ($j = $rowCount; $j < $itemsPerPage; $j++)
-                        {{-- Add a special class to the very last empty row for the final border --}}
                         <tr class="empty-row {{ ($j == $itemsPerPage - 1) ? 'last-empty-row' : '' }}">
-                            <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
-                            <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
+                            <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
+                            <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
                         </tr>
                     @endfor
                 @endif

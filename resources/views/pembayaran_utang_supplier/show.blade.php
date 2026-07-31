@@ -14,10 +14,12 @@
                             <i class="fas fa-arrow-left mr-1"></i>Kembali
                         </a>
                         @if($pembayaranUtangSupplier->status === 'pending')
+                            @can('edit pembayaran utang supplier')
                             <a href="{{ route('pembayaran-utang-supplier.edit', $pembayaranUtangSupplier) }}" 
                                class="btn btn-warning btn-sm">
                                 <i class="fas fa-edit mr-1"></i>Edit
                             </a>
+                            @endcan
                         @endif
                     </div>
                 </div>

@@ -122,10 +122,13 @@
                             </a>
 
                             @if($transaction->status != 'canceled')
+                                @can('edit penjualan')
                                 <a href="{{ route('transaksi.edit', $transaction->id) }}" class="btn btn-warning btn-sm" title="Edit Transaksi">
                                     <i class="fas fa-edit"></i>
                                 </a>
+                                @endcan
 
+                                @can('cancel penjualan')
                                 <button type="button" class="btn btn-danger btn-sm cancel-btn"
                                         data-toggle="modal"
                                         data-target="#cancelModal"
@@ -134,6 +137,7 @@
                                         title="Batalkan Transaksi">
                                     <i class="fas fa-ban"></i>
                                 </button>
+                                @endcan
                             @endif
 
                             @if($transaction->is_edited)

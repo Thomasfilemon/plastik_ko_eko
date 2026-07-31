@@ -5,6 +5,8 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use App\Http\Middleware\RoleMiddleware;
 use App\Http\Middleware\RedirectIfNotAuthenticated;
+use App\Http\Middleware\ForceHttps;
+use App\Http\Middleware\AdminDatabaseSwitchMiddleware;
 use Spatie\Permission\Middleware\PermissionMiddleware;
 use Spatie\Permission\Exceptions\UnauthorizedException;
 
@@ -16,21 +18,33 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // Define alias for role-based access
+        // Only trust proxies when explicitly configured.
+        // Defaulting to '*' breaks login when SSL is misconfigured
+        // (session cookie gets Secure flag and browser drops it).
+        $trustedProxies = env('TRUSTED_PROXIES');
+        if (!empty($trustedProxies)) {
+            $middleware->trustProxies(
+                at: $trustedProxies === '*' ? '*' : array_map('trim', explode(',', $trustedProxies))
+            );
+        }
+
         $middleware->alias([
             'role' => RoleMiddleware::class,
             'permission' => PermissionMiddleware::class,
         ]);
 
-        // Use custom authentication redirect middleware
-        $middleware->group('web', [
-            \Illuminate\Session\Middleware\StartSession::class,
-            \Illuminate\View\Middleware\ShareErrorsFromSession::class,
-            \Illuminate\Routing\Middleware\SubstituteBindings::class,
-            \App\Http\Middleware\RedirectIfNotAuthenticated::class,
-            \App\Http\Middleware\AdminDatabaseSwitchMiddleware::class,
-            // \App\Http\Middleware\RoleMiddleware::class,
-        ]);
+        // Append to Laravel's default web stack (EncryptCookies, CSRF, Session, etc.)
+        // Do NOT replace the whole group — that breaks sessions/login.
+        $append = [
+            RedirectIfNotAuthenticated::class,
+            AdminDatabaseSwitchMiddleware::class,
+        ];
+
+        if (filter_var(env('APP_FORCE_HTTPS', false), FILTER_VALIDATE_BOOLEAN)) {
+            array_unshift($append, ForceHttps::class);
+        }
+
+        $middleware->web(append: $append);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         $exceptions->render(function (UnauthorizedException $e, $request) {

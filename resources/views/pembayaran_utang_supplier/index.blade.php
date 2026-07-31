@@ -10,9 +10,11 @@
                         <i class="fas fa-money-bill-wave mr-2"></i>Pembayaran Utang ke Supplier
                     </h3>
                     <div class="card-tools">
+                        @can('create pembayaran utang supplier')
                         <a href="{{ route('pembayaran-utang-supplier.create') }}" class="btn btn-primary btn-sm">
                             <i class="fas fa-plus mr-1"></i>Tambah Pembayaran
                         </a>
+                        @endcan
                     </div>
                 </div>
                 <div class="card-body">
@@ -151,10 +153,13 @@
                                                 <i class="fas fa-eye"></i>
                                             </a>
                                             @if($pembayaran->status === 'pending')
+                                                @can('edit pembayaran utang supplier')
                                                 <a href="{{ route('pembayaran-utang-supplier.edit', $pembayaran) }}" 
                                                    class="btn btn-warning btn-sm" title="Edit">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
+                                                @endcan
+                                                @can('manage pembayaran utang supplier')
                                                 <form action="{{ route('pembayaran-utang-supplier.confirm', $pembayaran) }}" 
                                                       method="POST" style="display: inline;">
                                                     @csrf
@@ -171,6 +176,7 @@
                                                         <i class="fas fa-times"></i>
                                                     </button>
                                                 </form>
+                                                @endcan
                                             @endif
                                         </div>
                                     </td>

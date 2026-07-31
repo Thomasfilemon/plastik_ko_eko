@@ -35,6 +35,9 @@ class PermissionSeeder extends Seeder
 
         // Create roles and assign permissions
         $this->createRoles();
+
+        // Preserve access for existing roles after permission splits
+        $this->backfillSplitPermissions();
     }
 
     /**
@@ -88,6 +91,8 @@ class PermissionSeeder extends Seeder
         $this->createPermissionIfNotExists('manage kode barang');
         $this->createPermissionIfNotExists('edit kode barang');
         $this->createPermissionIfNotExists('delete kode barang');
+        // Master Barang: harga columns + footer totals (stock/qty stays visible without this)
+        $this->createPermissionIfNotExists('view total harga');
         $this->createPermissionIfNotExists('manage categories');
         $this->createPermissionIfNotExists('edit categories');
         $this->createPermissionIfNotExists('delete categories');
@@ -146,6 +151,7 @@ class PermissionSeeder extends Seeder
         $this->createPermissionIfNotExists('delete hutang');
         // Pembayaran Piutang
         $this->createPermissionIfNotExists('view pembayaran piutang');
+        $this->createPermissionIfNotExists('create pembayaran piutang');
         $this->createPermissionIfNotExists('edit pembayaran piutang');
         $this->createPermissionIfNotExists('manage pembayaran piutang');
     }
@@ -275,9 +281,11 @@ class PermissionSeeder extends Seeder
             'view stock',
             'view laporan',
             'view pembayaran piutang',
+            'create pembayaran piutang',
             'view wilayah',
             'manage wilayah',
             'edit wilayah',
+            'view total harga',
             'access sales report',
             'access purchase report',
             'access inventory report',
@@ -287,6 +295,7 @@ class PermissionSeeder extends Seeder
         $salesPermissions = [
             'view dashboard',
             'view master data',
+            'view total harga',
             'manage customers',
             'edit customers',
             'manage penjualan',
@@ -301,7 +310,7 @@ class PermissionSeeder extends Seeder
             'view retur penjualan',
             'create retur penjualan',
             'view stock',
-            // Allow viewing AR payment menu
+            // Allow viewing AR payment menu (list only; not create)
             'view pembayaran piutang',
             'view laporan',
             'access sales report'
@@ -310,6 +319,7 @@ class PermissionSeeder extends Seeder
         $inventoryPermissions = [
             'view dashboard',
             'view master data',
+            'view total harga',
             'manage barang',
             'edit barang',
             'manage kode barang',
@@ -329,6 +339,7 @@ class PermissionSeeder extends Seeder
         $financePermissions = [
             'view dashboard',
             'view master data',
+            'view total harga',
             'view transactions',
             'view kas',
             'manage kas',
@@ -340,8 +351,13 @@ class PermissionSeeder extends Seeder
             'cancel hutang',
             // Pembayaran Piutang
             'view pembayaran piutang',
+            'create pembayaran piutang',
             'edit pembayaran piutang',
             'manage pembayaran piutang',
+            'view pembayaran utang supplier',
+            'create pembayaran utang supplier',
+            'edit pembayaran utang supplier',
+            'manage pembayaran utang supplier',
             'view laporan',
             'access finance report'
         ];
@@ -350,6 +366,7 @@ class PermissionSeeder extends Seeder
         $seniorSalesPermissions = [
             'view dashboard',
             'view master data',
+            'view total harga',
             'manage customers',
             'edit customers',
             'delete customers',
@@ -372,6 +389,7 @@ class PermissionSeeder extends Seeder
         $seniorInventoryPermissions = [
             'view dashboard',
             'view master data',
+            'view total harga',
             'manage barang',
             'edit barang',
             'delete barang',
@@ -505,5 +523,32 @@ class PermissionSeeder extends Seeder
         // Sync permissions
         $role->syncPermissions($permissions);
         $this->command->info("Permissions synced for role '{$name}'.");
+    }
+
+    /**
+     * After splitting create/view, keep existing edit/manage roles able to create.
+     * Does NOT auto-grant view total harga (Tata must stay stock-only unless checked).
+     */
+    private function backfillSplitPermissions()
+    {
+        $this->command->info('Backfilling split permissions for existing roles...');
+
+        foreach (Role::all() as $role) {
+            if ($role->hasPermissionTo('edit pembayaran piutang') || $role->hasPermissionTo('manage pembayaran piutang')) {
+                $role->givePermissionTo('create pembayaran piutang');
+            }
+
+            if ($role->hasPermissionTo('edit pembayaran utang supplier') || $role->hasPermissionTo('manage pembayaran utang supplier')) {
+                $role->givePermissionTo('create pembayaran utang supplier');
+            }
+
+            // Migrate old harga perms → view total harga (then leave role checklist as source of truth)
+            $hadOldHarga = $role->permissions->contains(function ($p) {
+                return in_array($p->name, ['view harga beli', 'view harga jual'], true);
+            });
+            if ($hadOldHarga) {
+                $role->givePermissionTo('view total harga');
+            }
+        }
     }
 }

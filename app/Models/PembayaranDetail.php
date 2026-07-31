@@ -116,6 +116,9 @@ class PembayaranDetail extends Model
     public static function getTotalPelunasanByTransaksi($transaksiId): float
     {
         return self::where('transaksi_id', $transaksiId)
+            ->whereHas('pembayaran', function ($query) {
+                $query->where('status', 'confirmed');
+            })
             ->sum('jumlah_dilunasi');
     }
 
@@ -142,9 +145,10 @@ class PembayaranDetail extends Model
         
         // Hitung total nota kredit yang digunakan untuk transaksi ini
         $totalNotaKreditDigunakan = \App\Models\PembayaranPiutangNotaKredit::whereHas('pembayaran', function($query) use ($transaksiId) {
-            $query->whereHas('details', function($q) use ($transaksiId) {
-                $q->where('transaksi_id', $transaksiId);
-            });
+            $query->where('status', 'confirmed')
+                ->whereHas('details', function($q) use ($transaksiId) {
+                    $q->where('transaksi_id', $transaksiId);
+                });
         })->sum('jumlah_digunakan');
 
         // Sisa piutang = (grand_total - total_nota_kredit_digunakan) - total_dibayar

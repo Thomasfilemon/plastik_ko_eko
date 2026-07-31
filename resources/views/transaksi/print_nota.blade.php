@@ -105,11 +105,12 @@ use Riskihajar\Terbilang\Facades\Terbilang;
 
         .signatures {
             display: flex;
-            justify-content: space-between;
+            justify-content: flex-end;
+            gap: 8%;
             margin-top: 18px;
         }
         .sign-col {
-            width: 45%;
+            width: 28%;
             text-align: center;
             font-size: 8pt;
         }
@@ -194,8 +195,8 @@ use Riskihajar\Terbilang\Facades\Terbilang;
                     <th style="width:35%;">Nama Barang</th>
                     <th class="center" style="width:12%;">Satuan Besar</th>
                     <th class="center" style="width:13%;">Kuantiti (Satuan Kecil)</th>
-                    <th class="right" style="width:15%;">Harga @</th>
-                    <th class="right" style="width:20%;">Jumlah</th>
+                    <th class="center" style="width:15%;">Harga @</th>
+                    <th class="center" style="width:20%;">Jumlah</th>
                 </tr>
             </thead>
             <tbody>
@@ -210,35 +211,35 @@ use Riskihajar\Terbilang\Facades\Terbilang;
                             $kb = \App\Models\KodeBarang::where('kode_barang', $item->kode_barang)->first();
                             $unitDasar = $kb->unit_dasar ?? ($item->satuan ?? 'LBR');
 
-                            // Tentukan satuan besar dari data item jika berbeda dengan unit dasar
-                            $satuanItem = $item->satuan ?? $unitDasar;
+                            // Utamakan data satuan besar yang sudah disimpan pada item
+                            $bigUnit = $item->satuan_besar ?? null;
+                            $bigQty = $item->qty_besar ?? null;
 
-                            // Cari konversi jika satuan item adalah turunan
-                            $bigUnit = null;
-                            $bigQty = null;
-                            if ($kb && $satuanItem !== $unitDasar) {
-                                $conv = \App\Models\UnitConversion::active()
-                                    ->where('kode_barang_id', $kb->id)
-                                    ->where('unit_turunan', $satuanItem)
-                                    ->first();
-                                if ($conv) {
-                                    $bigUnit = $satuanItem; // tampilkan unit turunan sebagai satuan besar
-                                    $bigQty = $conv->nilai_konversi > 0 ? ($item->qty / $conv->nilai_konversi) : $item->qty;
+                            // Fallback untuk data lama: hitung dari konversi jika satuan item adalah turunan
+                            if (empty($bigUnit)) {
+                                $satuanItem = $item->satuan ?? $unitDasar;
+                                if ($kb && $satuanItem !== $unitDasar) {
+                                    $conv = \App\Models\UnitConversion::active()
+                                        ->where('kode_barang_id', $kb->id)
+                                        ->where('unit_turunan', $satuanItem)
+                                        ->first();
+                                    if ($conv) {
+                                        $bigUnit = $satuanItem;
+                                        $bigQty = $conv->nilai_konversi > 0 ? ($item->qty / $conv->nilai_konversi) : $item->qty;
+                                    }
                                 }
                             }
-
-                            // Jika tidak ada konversi yang ditemukan, fallback: tidak ada satuan besar
                         @endphp
                         <td class="center">
-                            @if($bigUnit)
-                                {{ number_format($bigQty, 2) }} {{ $bigUnit }}
+                            @if(!empty($bigUnit))
+                                {{ rtrim(rtrim(number_format($bigQty, 2, '.', ''), '0'), '.') }} {{ $bigUnit }}
                             @else
                                 -
                             @endif
                         </td>
                         <td class="center">{{ number_format($item->qty, 2) }} {{ $unitDasar }}</td>
-                        <td class="right">{{ $item->harga == 0 ? 'Bonus' : 'Rp '.number_format($item->harga, 0, ',', '.') }}</td>
-                        <td class="right">Rp {{ number_format($item->total, 0, ',', '.') }}</td>
+                        <td class="center">{{ $item->harga == 0 ? 'Bonus' : 'Rp '.number_format($item->harga, 0, ',', '.') }}</td>
+                        <td class="center">Rp {{ number_format($item->total, 0, ',', '.') }}</td>
                     </tr>
                 @endforeach
                 @if ($loop->last)
@@ -263,29 +264,28 @@ use Riskihajar\Terbilang\Facades\Terbilang;
                 <tr><th>GRAND TOTAL</th><td class="right"><strong>Rp {{ number_format($transaction->grand_total, 0, ',', '.') }}</strong></td></tr>
             </table>
 
-            <div style="text-align:right; margin-bottom:8px;">
-                Titipan Uang: Rp {{ number_format($transaction->dp, 0, ',', '.') }}<br>
-                Sisa Piutang: Rp {{ number_format($transaction->grand_total - $transaction->dp, 0, ',', '.') }}<br>
-                <em>Terbilang: {{ ucwords(Terbilang::make($transaction->grand_total, ' rupiah')) }}</em>
-            </div>
-
-            <div class="payment-box">
-                <div><strong>Pembayaran Transfer ke A/N {{ $defaultCompany->nama ?? '' }}</strong></div>
-                <div>BRI: {{ $defaultCompany->bri_account ?? '0285-01-001326-560' }}</div>
-                <div>BCA: {{ $defaultCompany->bca_account ?? '020 523 0187' }}</div>
-                <br>
-                <div><strong>Pembayaran GIRO / CHEQ ke A/N {{ $defaultCompany->nama ?? '' }}</strong></div>
-                <div>BCA: {{ $defaultCompany->bca_account ?? '020 523 0187' }}</div>
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+                <div style="text-align:left; font-size:8.5pt; line-height:1.3;">
+                    <strong>Pembayaran Transfer:</strong><br>
+                    BCA 0202377881<br>
+                    Novita Sari
+                </div>
+                <div style="text-align:right;">
+                    <em>Terbilang: {{ ucwords(Terbilang::make($transaction->grand_total, ' rupiah')) }}</em>
+                </div>
             </div>
 
             <div class="signatures">
+                <div class="sign-col" style="visibility:hidden;">
+                    &nbsp;
+                </div>
                 <div class="sign-col">
-                    <strong>Diterima Oleh</strong>
+                    <strong>Hormat Kami</strong>
                     ( _____________ )<br>
                     <small>Tanda tangan & Nama jelas</small>
                 </div>
                 <div class="sign-col">
-                    <strong>Hormat Kami</strong>
+                    <strong>Diterima Oleh</strong>
                     ( _____________ )<br>
                     <small>Tanda tangan & Nama jelas</small>
                 </div>

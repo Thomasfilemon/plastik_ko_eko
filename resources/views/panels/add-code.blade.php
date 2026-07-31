@@ -66,18 +66,20 @@
                         
                         <div class="form-group">
                             <label for="unit_dasar"><i class="fas fa-ruler mr-1"></i> Satuan Kecil</label>
-                            <select class="form-control @error('unit_dasar') is-invalid @enderror" id="unit_dasar" name="unit_dasar" required>
-                                <option value="">Pilih Satuan Kecil</option>
-                                <option value="LBR" {{ old('unit_dasar') == 'LBR' ? 'selected' : '' }}>LBR (Lembar)</option>
-                                <option value="KG" {{ old('unit_dasar') == 'KG' ? 'selected' : '' }}>KG (Kilogram)</option>
-                                <option value="M" {{ old('unit_dasar') == 'M' ? 'selected' : '' }}>M (Meter)</option>
-                                <option value="PCS" {{ old('unit_dasar') == 'PCS' ? 'selected' : '' }}>PCS (Pieces)</option>
-                                <option value="PAK" {{ old('unit_dasar') == 'PAK' ? 'selected' : '' }}>PAK (Pack)</option>
-                            </select>
+                            <input type="text" class="form-control @error('unit_dasar') is-invalid @enderror" id="unit_dasar" name="unit_dasar" value="{{ old('unit_dasar') }}" list="satuan_kecil_suggestions" placeholder="Ketik satuan kecil (mis. LBR, KG, ROLL)" maxlength="20" required>
+                            <datalist id="satuan_kecil_suggestions">
+                                <option value="LBR"></option>
+                                <option value="KG"></option>
+                                <option value="M"></option>
+                                <option value="PCS"></option>
+                                <option value="PAK"></option>
+                                <option value="BOX"></option>
+                                <option value="ROLL"></option>
+                            </datalist>
                             @error('unit_dasar')
                                 <div class="invalid-feedback">{{ $message }}</div>
                             @enderror
-                            <small class="form-text text-muted">Satuan terkecil untuk perhitungan harga.</small>
+                            <small class="form-text text-muted">Ketik satuan sendiri atau pilih dari saran. Satuan terkecil untuk perhitungan harga.</small>
                         </div>
                         <div class="form-group">
                             <label for="harga_jual"><i class="fas fa-tag mr-1"></i> Harga Jual per Satuan Dasar</label>

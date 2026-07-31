@@ -116,6 +116,8 @@
                             <th>Keterangan</th>
                             <th>Harga</th>
                             <th>Qty</th>
+                            <th>Satuan Kecil</th>
+                            <th>Satuan Besar</th>
                             <th>Total</th>
                             <th>Diskon</th>
                             <th>Aksi</th>
@@ -242,9 +244,100 @@
     </div>
 </div>
 
+<!-- Edit Item Modal -->
+<div class="modal fade" id="editItemModal" tabindex="-1" role="dialog" aria-labelledby="editItemModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editItemModalLabel">Edit Barang</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit_item_index">
+                <div class="form-group">
+                    <label>Nama Barang</label>
+                    <input type="text" class="form-control" id="edit_item_nama">
+                </div>
+                <div class="row">
+                    <div class="col-md-6 form-group">
+                        <label>Qty</label>
+                        <input type="number" class="form-control" id="edit_item_qty" step="0.01" min="0.01">
+                        <small class="form-text text-muted" id="edit_item_qty_hint" style="display:none;"></small>
+                    </div>
+                    <div class="col-md-6 form-group">
+                        <label>Harga <small class="text-muted">(per satuan kecil)</small></label>
+                        <input type="number" class="form-control" id="edit_item_harga" step="0.01" min="0">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 form-group">
+                        <label>Satuan Kecil</label>
+                        <input type="text" class="form-control" id="edit_item_satuan_kecil" readonly>
+                    </div>
+                    <div class="col-md-6 form-group">
+                        <label>Satuan Besar</label>
+                        <select class="form-control" id="edit_item_satuan_besar"></select>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 form-group">
+                        <label>Diskon (%)</label>
+                        <input type="number" class="form-control" id="edit_item_diskon" min="0" max="100">
+                    </div>
+                    <div class="col-md-6 form-group">
+                        <label>Ongkos Kuli</label>
+                        <input type="number" class="form-control" id="edit_item_ongkos_kuli" step="0.01" min="0">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Keterangan</label>
+                    <input type="text" class="form-control" id="edit_item_keterangan">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="saveEditItemBtn">
+                    <i class="fas fa-save mr-1"></i> Simpan Perubahan
+                </button>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Tutup</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @endsection
 
 @section('scripts')
+@php
+    $editItemsPayload = $transaction->items->map(function ($item) {
+        $kode = $item->kodeBarang;
+        $hasBesar = !empty($item->satuan_besar) && !empty($item->qty_besar) && (float) $item->qty_besar > 0;
+        $factor = $hasBesar ? ((float) $item->qty / (float) $item->qty_besar) : 1.0;
+        $qtyDisplay = $hasBesar ? (float) $item->qty_besar : (float) $item->qty;
+        $satuanKecil = $item->satuan ?: (optional($kode)->unit_dasar ?? 'LBR');
+
+        return [
+            'kodeBarang' => $item->kode_barang,
+            'kodeBarangId' => optional($kode)->id,
+            'namaBarang' => $item->nama_barang,
+            'keterangan' => $item->keterangan,
+            // Harga selalu per satuan kecil
+            'harga' => (float) $item->harga,
+            'panjang' => (float) ($item->panjang ?? 0),
+            'lebar' => (float) ($item->lebar ?? 0),
+            'qty' => $qtyDisplay,
+            'qtyKecil' => (float) $item->qty,
+            'unitFactor' => $factor,
+            'satuan' => $hasBesar ? $item->satuan_besar : $satuanKecil,
+            'satuanKecil' => $satuanKecil,
+            'satuanBesar' => $item->satuan_besar ?: '',
+            'diskon' => (float) $item->diskon,
+            'ongkosKuli' => (float) ($item->ongkos_kuli ?? 0),
+            'total' => (float) $item->total,
+        ];
+    })->values();
+@endphp
 <script>
     function showLoading() {
         $('#loadingOverlay').fadeIn(100);
@@ -255,19 +348,7 @@
     
     $(document).ready(function() {
         // Initialize variables with existing items from the database
-        let items = @json($transaction->items->map(function($item) {
-            $array = [];
-            $array['kodeBarang'] = $item->kode_barang;
-            $array['namaBarang'] = $item->nama_barang;
-            $array['keterangan'] = $item->keterangan;
-            $array['harga'] = (int)$item->harga;
-            $array['panjang'] = (int)$item->panjang;
-            $array['lebar'] = (int)$item->lebar;
-            $array['qty'] = (int)$item->qty;
-            $array['diskon'] = (int)$item->diskon;
-            $array['total'] = (int)$item->total;
-            return $array;
-        })->toArray());
+        let items = @json($editItemsPayload);
         let grandTotal = {{ $transaction->grand_total }};
         
         // Render items immediately to display existing items
@@ -427,32 +508,44 @@
         const kodeBarang = $('#kode_barang').val();
         const namaBarang = $('#nama_barang').val();
         const keterangan = $('#keterangan').val();
-        const harga = parseInt($('#harga').val()) || 0;  // ✅ Use form input
-        const panjang = parseInt($('#panjang').val()) || 0;
-        const lebar = parseInt($('#lebar').val()) || 0;
-        const qty = parseInt($('#quantity').val()) || 0;
-        const diskon = parseInt($('#diskon').val()) || 0;
+        const harga = parseFloat($('#harga').val()) || 0; // per satuan kecil
+        const panjang = parseFloat($('#panjang').val()) || 0;
+        const lebar = parseFloat($('#lebar').val()) || 0;
+        const qty = parseFloat($('#quantity').val()) || 0;
+        const diskon = parseFloat($('#diskon').val()) || 0;
+        const satuanKecil = $('#satuanKecil').val() || 'LBR';
+        const satuanBesar = $('#satuanBesar').val() || '';
+        const factors = $('#addItemForm').data('unit-factors') || {};
+        const factor = satuanBesar ? (parseFloat(factors[satuanBesar]) || 1) : 1;
+        const qtyKecil = qty * factor;
 
         if (!kodeBarang || !namaBarang || harga === undefined || harga === null || !qty) {
             alert('Mohon lengkapi data barang!');
             return;
         }
 
-        // ✅ Calculate total directly from form inputs
-        const subTotal = harga * qty;
+        // Total = qty(besar) × factor × harga kecil
+        const subTotal = harga * qtyKecil;
         const diskonAmount = (diskon / 100) * subTotal;
         const total = subTotal - diskonAmount;
 
         const newItem = {
             kodeBarang,
+            kodeBarangId: $('#kode_barang_id').val() || null,
             namaBarang,
             keterangan,
-            harga,      // ✅ Use selling price from form
+            harga,
             panjang,
             lebar,
             qty,
+            qtyKecil,
+            unitFactor: factor,
+            satuanKecil,
+            satuanBesar,
+            satuan: satuanBesar ? satuanBesar : satuanKecil,
             diskon,
-            total       // ✅ Use calculated total
+            ongkosKuli: parseFloat($('#ongkos_kuli').val()) || 0,
+            total
         };
 
         items.push(newItem);
@@ -461,6 +554,7 @@
 
         // Reset form and close modal
         $('#addItemForm')[0].reset();
+        $('#qtyConversionHint').hide().text('');
         $('#addItemModal').modal('hide');
         $('body').removeClass('modal-open');
         $('.modal-backdrop').remove();
@@ -473,21 +567,29 @@
             tbody.empty();
 
             items.forEach((item, index) => {
+                const satuanKecil = item.satuanKecil || item.satuan || 'LBR';
+                const satuanBesar = item.satuanBesar || '-';
+                const qtyLabel = item.satuanBesar && item.qtyKecil
+                    ? `${item.qty} ${item.satuanBesar} <small class="text-muted">(= ${item.qtyKecil} ${satuanKecil})</small>`
+                    : `${item.qty}`;
                 tbody.append(`
                     <tr>
                         <td>${item.kodeBarang}</td>
                         <td>${item.namaBarang}</td>
-                        <td>${item.keterangan}</td>
+                        <td>${item.keterangan || '-'}</td>
                         <td class="text-right">${formatCurrency(item.harga)}</td>
-                        <td>${item.qty}</td>
+                        <td>${qtyLabel}</td>
+                        <td>${satuanKecil}</td>
+                        <td>${satuanBesar}</td>
                         <td class="text-right">${formatCurrency(item.total)}</td>
-                        <td class="text-right">${item.diskon}%</td>
+                        <td class="text-right">${item.diskon || 0}%</td>
                         <td>
-@can('delete invoice items')
-                            <button type="button" class="btn btn-sm btn-danger remove-item" data-index="${index}">
+                            <button type="button" class="btn btn-sm btn-primary edit-item" data-index="${index}" title="Edit barang">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-danger remove-item" data-index="${index}" title="Hapus barang">
                                 <i class="fas fa-trash"></i>
                             </button>
-@endcan
                         </td>
                     </tr>
                 `);
@@ -501,8 +603,129 @@
                 calculateTotals();
             });
 
-            $('#addItemModal').modal('hide');
+            $('.edit-item').click(function() {
+                openEditItemModal($(this).data('index'));
+            });
         }
+
+        function openEditItemModal(index) {
+            const item = items[index];
+            if (!item) return;
+
+            $('#edit_item_index').val(index);
+            $('#edit_item_nama').val(item.namaBarang || '');
+            $('#edit_item_qty').val(item.qty);
+            $('#edit_item_harga').val(item.harga);
+            $('#edit_item_satuan_kecil').val(item.satuanKecil || item.satuan || 'LBR');
+            $('#edit_item_diskon').val(item.diskon || 0);
+            $('#edit_item_ongkos_kuli').val(item.ongkosKuli || 0);
+            $('#edit_item_keterangan').val(item.keterangan || '');
+
+            const besarSelect = $('#edit_item_satuan_besar');
+            besarSelect.empty();
+            besarSelect.append('<option value="">- (pakai satuan kecil)</option>');
+
+            const unitDasar = item.satuanKecil || item.satuan || 'LBR';
+            const seedFactors = { [unitDasar]: 1 };
+            if (item.satuanBesar && item.unitFactor) {
+                seedFactors[item.satuanBesar] = item.unitFactor;
+            }
+            $('#editItemModal').data('unit-factors', seedFactors);
+
+            if (item.kodeBarangId) {
+                $.ajax({
+                    url: `{{ url('sales-order/available-units') }}/${item.kodeBarangId}`,
+                    method: 'GET',
+                    success: function(units) {
+                        const unitList = Array.isArray(units) ? units : (units.units || []);
+                        const factors = Array.isArray(units) ? {} : (units.factors || {});
+                        $('#editItemModal').data('unit-factors', Object.assign({ [unitDasar]: 1 }, factors));
+                        unitList.forEach(function(u) {
+                            if (u !== unitDasar) {
+                                const factor = factors[u] || 1;
+                                besarSelect.append(`<option value="${u}">${u} (1 = ${factor} ${unitDasar})</option>`);
+                            }
+                        });
+                        besarSelect.val(item.satuanBesar || '');
+                        updateEditItemQtyHint();
+                    },
+                    error: function() {
+                        if (item.satuanBesar) {
+                            besarSelect.append(`<option value="${item.satuanBesar}">${item.satuanBesar}</option>`);
+                        }
+                        besarSelect.val(item.satuanBesar || '');
+                        updateEditItemQtyHint();
+                    }
+                });
+            } else if (item.satuanBesar) {
+                besarSelect.append(`<option value="${item.satuanBesar}">${item.satuanBesar}</option>`);
+                besarSelect.val(item.satuanBesar);
+            }
+
+            $('#editItemModal').modal('show');
+            updateEditItemQtyHint();
+        }
+
+        function updateEditItemQtyHint() {
+            const qty = parseFloat($('#edit_item_qty').val()) || 0;
+            const satuanKecil = $('#edit_item_satuan_kecil').val() || 'LBR';
+            const satuanBesar = $('#edit_item_satuan_besar').val() || '';
+            const factors = $('#editItemModal').data('unit-factors') || {};
+            const factor = satuanBesar ? (parseFloat(factors[satuanBesar]) || 1) : 1;
+            const hint = $('#edit_item_qty_hint');
+            if (satuanBesar && qty > 0 && factor > 1) {
+                hint.text(`${qty} ${satuanBesar} = ${qty * factor} ${satuanKecil} (harga × ${satuanKecil})`).show();
+            } else {
+                hint.hide().text('');
+            }
+        }
+
+        $(document).on('input change', '#edit_item_qty, #edit_item_satuan_besar', updateEditItemQtyHint);
+
+        $('#saveEditItemBtn').click(function() {
+            const index = parseInt($('#edit_item_index').val(), 10);
+            const item = items[index];
+            if (!item) return;
+
+            const qty = parseFloat($('#edit_item_qty').val()) || 0;
+            const harga = parseFloat($('#edit_item_harga').val()) || 0;
+            const diskon = parseFloat($('#edit_item_diskon').val()) || 0;
+            const ongkosKuli = parseFloat($('#edit_item_ongkos_kuli').val()) || 0;
+            const keterangan = $('#edit_item_keterangan').val();
+            const namaBarang = $('#edit_item_nama').val() || item.namaBarang;
+            const satuanKecil = item.satuanKecil || item.satuan || 'LBR';
+            const satuanBesar = $('#edit_item_satuan_besar').val();
+            const factors = $('#editItemModal').data('unit-factors') || {};
+            const factor = satuanBesar ? (parseFloat(factors[satuanBesar]) || item.unitFactor || 1) : 1;
+
+            if (!qty) {
+                alert('Mohon lengkapi qty dan harga!');
+                return;
+            }
+
+            const qtyKecil = qty * factor;
+            const subtotal = harga * qtyKecil;
+            const total = subtotal - (subtotal * diskon) / 100;
+
+            items[index] = Object.assign({}, item, {
+                namaBarang,
+                qty,
+                qtyKecil,
+                unitFactor: factor,
+                harga,
+                diskon,
+                ongkosKuli,
+                keterangan,
+                satuanKecil,
+                satuanBesar,
+                satuan: satuanBesar ? satuanBesar : satuanKecil,
+                total
+            });
+
+            $('#editItemModal').modal('hide');
+            renderItems();
+            calculateTotals();
+        });
 
         // Calculate all totals
         function calculateTotals() {

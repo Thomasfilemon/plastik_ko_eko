@@ -13,6 +13,7 @@ use App\Models\Panel;
 use Illuminate\Support\Facades\Auth;
 use App\Models\User;
 use App\Models\StockBatch;
+use App\Services\UnitConversionService;
 
 
 class PembelianController extends Controller
@@ -24,6 +25,106 @@ class PembelianController extends Controller
     {
         $this->stockController = $stockController;
         $this->panelController = $panelController;
+    }
+
+    /**
+     * Resolve satuan besar / satuan kecil into base-unit quantities.
+     *
+     * Returns the quantity and price expressed in the item's base unit (unit_dasar)
+     * so all downstream stock, FIFO and panel logic keeps working in base units,
+     * while also returning the big-unit info for display on the nota.
+     */
+    private function resolveUnitConversion($kodeBarangModel, array $item): array
+    {
+        $unitDasar = $kodeBarangModel->unit_dasar ?? 'LBR';
+        $qtyInput = (float) ($item['qty'] ?? 0);
+        $hargaInput = (float) ($item['harga'] ?? 0);
+        $satuanInput = $item['satuan'] ?? $unitDasar;
+        if ($satuanInput === '' || $satuanInput === null) {
+            $satuanInput = $unitDasar;
+        }
+
+        // Number of base units contained in 1 of the chosen unit
+        $factor = 1.0;
+        if ($satuanInput !== $unitDasar) {
+            $service = new UnitConversionService();
+            $factor = $service->convertToBaseUnit($kodeBarangModel->id, 1, $satuanInput);
+            if ($factor <= 0) {
+                $factor = 1.0;
+            }
+        }
+
+        $isBesar = ($satuanInput !== $unitDasar) && $factor > 1;
+
+        return [
+            'qty_base' => $qtyInput * $factor,
+            // Harga selalu per satuan kecil (unit dasar)
+            'harga_base' => $hargaInput,
+            'satuan' => $unitDasar,
+            'satuan_besar' => $isBesar ? $satuanInput : null,
+            'qty_besar' => $isBesar ? $qtyInput : null,
+        ];
+    }
+
+    /**
+     * Zero FIFO StockBatch rows for pembelian items that have not been sold yet.
+     * Throws if any batch qty was already consumed by penjualan.
+     */
+    private function reverseUnusedStockBatches($items, string $nota, string $actionLabel = 'dibatalkan'): void
+    {
+        foreach ($items as $item) {
+            $batches = StockBatch::where('pembelian_item_id', $item->id)->get();
+
+            // Fallback for orphaned batches (pembelian_item_id set null after prior buggy deletes)
+            if ($batches->isEmpty()) {
+                $kodeBarang = KodeBarang::where('kode_barang', $item->kode_barang)->first();
+                if ($kodeBarang) {
+                    $batches = StockBatch::where('kode_barang_id', $kodeBarang->id)
+                        ->where('batch_number', $nota . '-' . $item->kode_barang)
+                        ->where('qty_sisa', '>', 0)
+                        ->get();
+                }
+            }
+
+            foreach ($batches as $batch) {
+                $usedQty = (float) $batch->qty_masuk - (float) $batch->qty_sisa;
+                if ($usedQty > 0.0001) {
+                    throw new \Exception(
+                        "Nota tidak dapat {$actionLabel}: stok {$item->nama_barang} sudah terpakai sebanyak {$usedQty} "
+                        . "(sudah terjual/dipakai di penjualan). Batalkan atau edit faktur penjualan yang memakai stok ini terlebih dahulu, "
+                        . "baru nota pembelian ini bisa {$actionLabel}."
+                    );
+                }
+
+                $batch->qty_sisa = 0;
+                $batch->keterangan = trim(($batch->keterangan ?? '') . " [{$actionLabel}]");
+                $batch->save();
+            }
+        }
+    }
+
+    /**
+     * Create a FIFO StockBatch for a pembelian item (base-unit qty).
+     */
+    private function createStockBatchForItem(
+        PembelianItem $pembelianItem,
+        KodeBarang $kodeBarang,
+        float $qtyBase,
+        float $hargaBase,
+        $tanggal,
+        string $nota,
+        string $supplierName
+    ): void {
+        StockBatch::create([
+            'kode_barang_id' => $kodeBarang->id,
+            'pembelian_item_id' => $pembelianItem->id,
+            'qty_masuk' => $qtyBase,
+            'qty_sisa' => $qtyBase,
+            'harga_beli' => $hargaBase,
+            'tanggal_masuk' => $tanggal,
+            'batch_number' => $nota . '-' . $pembelianItem->kode_barang,
+            'keterangan' => 'Pembelian dari ' . $supplierName,
+        ]);
     }
 
     /**
@@ -114,44 +215,42 @@ class PembelianController extends Controller
             
             // Create purchase items, update stock mutation, and add inventory
             foreach ($request->items as $item) {
-                // Create purchase item
+                // Resolve satuan besar/kecil into base-unit quantity & price
+                $kodeBarang = KodeBarang::where('kode_barang', $item['kodeBarang'])->first();
+                $conv = $kodeBarang
+                    ? $this->resolveUnitConversion($kodeBarang, $item)
+                    : ['qty_base' => (float) $item['qty'], 'harga_base' => (float) $item['harga'], 'satuan' => 'LBR', 'satuan_besar' => null, 'qty_besar' => null];
+
+                $qtyBase = $conv['qty_base'];
+                $hargaBase = $conv['harga_base'];
+
+                // Create purchase item (stored in base units, with big-unit info for the nota)
                 $pembelianItem = PembelianItem::create([
                     'nota' => $request->nota,
                     'kode_barang' => $item['kodeBarang'],
                     'nama_barang' => $item['namaBarang'],
                     'keterangan' => $item['keterangan'] ?? null,
-                    'harga' => $item['harga'],
-                    'qty' => $item['qty'],
+                    'harga' => $hargaBase,
+                    'qty' => $qtyBase,
+                    'satuan' => $conv['satuan'],
+                    'satuan_besar' => $conv['satuan_besar'],
+                    'qty_besar' => $conv['qty_besar'],
                     'diskon' => $item['diskon'] ?? 0,
                     'total' => $item['total'],
                     'created_at' => $currentDateTime,
                 ]);
 
                 // Create StockBatch untuk sistem FIFO
-                $kodeBarang = KodeBarang::where('kode_barang', $item['kodeBarang'])->first();
                 if ($kodeBarang) {
-                     $stockBatch =StockBatch::create([
-                        'kode_barang_id' => $kodeBarang->id,
-                        'pembelian_item_id' => $pembelianItem->id,
-                        'qty_masuk' => $item['qty'],
-                        'qty_sisa' => $item['qty'], // Awalnya sama dengan qty_masuk
-                        'harga_beli' => $item['harga'],
-                        'tanggal_masuk' => $request->tanggal,
-                        'batch_number' => $request->nota . '-' . $item['kodeBarang'],
-                        'keterangan' => 'Pembelian dari ' . $supplierName
-                    ]);
-
-                     Log::info('FIFO - Batch Baru Masuk', [
-                        'nota' => $request->nota,
-                        'kode_barang' => $item['kodeBarang'],
-                        'nama_barang' => $item['namaBarang'],
-                        'batch_id' => $stockBatch->id,
-                        'qty_masuk' => $stockBatch->qty_masuk,
-                        'qty_sisa' => $stockBatch->qty_sisa,
-                        'harga_beli' => $stockBatch->harga_beli,
-                        'tanggal_masuk' => $stockBatch->tanggal_masuk,
-                        'created_by' => $creator,
-                    ]);
+                    $this->createStockBatchForItem(
+                        $pembelianItem,
+                        $kodeBarang,
+                        $qtyBase,
+                        $hargaBase,
+                        $request->tanggal,
+                        $request->nota,
+                        $supplierName
+                    );
                 }
                 
                 // Record purchase in stock mutation (just for reporting)
@@ -162,15 +261,12 @@ class PembelianController extends Controller
                     $tanggalWithTime, // Use date with time
                     $request->nota,
                     $supplierName . ' (' . $request->kode_supplier . ')',
-                    $item['qty'],
-                    'LBR', // Unit of measure
+                    $qtyBase,
+                    $conv['satuan'], // Unit of measure (base unit)
                     'Purchase transaction', // Keterangan
                     $creator, // Created by
                     'default' // Stock owner
                 );
-                
-                // Get the kode barang record
-                $kodeBarang = KodeBarang::where('kode_barang', $item['kodeBarang'])->first();
                 
                 if ($kodeBarang) {
                     // Get a panel instance with this kode_barang to use as a template
@@ -178,47 +274,32 @@ class PembelianController extends Controller
                     
                     // Default values if no template exists
                     $panelName = $item['namaBarang'];
-                    // $length = $kodeBarang->length ?? 0;
-                    $cost = $item['harga']; // Use purchase price as cost for this purchase only
-                    $price = $templatePanel ? $templatePanel->price : ($item['harga'] * 1.2); // 20% markup if no template
+                    $cost = $hargaBase; // Use purchase price (per base unit) as cost
                     
                     // If template exists, use its values
                     if ($templatePanel) {
                         $panelName = $templatePanel->name;
-                        // $length = $templatePanel->length ?? $length;
-                        $price = $templatePanel->price;
                     }
                     
                     // Use the PanelController to add panels to inventory
                     $panelController = app()->make(PanelController::class);
                     
-                    // Check if the method accepts the timestamp parameter
-                    try {
-                        $result = $panelController->addPanelsToInventory(
-                            $panelName, 
-                            $cost, 
-                            $item['kodeBarang'], 
-                            (int) $item['qty']
-                        );
-                    } catch (\ArgumentCountError $e) {
-                        // If the method doesn't accept the timestamp, use the original method
-                        $result = $panelController->addPanelsToInventory(
-                            $panelName, 
-                            $cost, 
-                            $item['kodeBarang'], 
-                            (int) $item['qty']
-                        );
-                    }
+                    $result = $panelController->addPanelsToInventory(
+                        $panelName, 
+                        $cost, 
+                        $item['kodeBarang'], 
+                        (int) $qtyBase
+                    );
                     
                     // Log the result
                     Log::info('Added panels to inventory:', ['result' => $result]);
                     
-                    // Update cost di master barang dengan harga pembelian terbaru
-                    $kodeBarang->cost = $item['harga'];
+                    // Update cost di master barang dengan harga pembelian terbaru (per base unit)
+                    $kodeBarang->cost = $hargaBase;
                     $kodeBarang->save();
                     Log::info('Updated master barang cost:', [
                         'kode_barang' => $item['kodeBarang'],
-                        'new_cost' => $item['harga']
+                        'new_cost' => $hargaBase
                     ]);
                 } else {
                     Log::warning('KodeBarang not found for purchase item:', ['kode_barang' => $item['kodeBarang']]);
@@ -358,7 +439,12 @@ class PembelianController extends Controller
      */
     public function edit($id)
     {
-        $purchase = Pembelian::with(['items', 'supplierRelation'])->findOrFail($id);
+        $purchase = Pembelian::with(['items.kodeBarang', 'supplierRelation'])->findOrFail($id);
+
+        if ($purchase->status === 'canceled') {
+            return redirect()->route('pembelian.nota.list')
+                ->with('error', 'Nota pembelian yang sudah dibatalkan tidak dapat diedit.');
+        }
         
         // Get the supplier info
         $supplier = null;
@@ -394,6 +480,14 @@ class PembelianController extends Controller
             
             // Find purchase
             $pembelian = Pembelian::findOrFail($id);
+
+            if ($pembelian->status === 'canceled') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Nota pembelian yang sudah dibatalkan tidak dapat diedit.'
+                ], 400);
+            }
+
             $nota = $pembelian->nota; // Keep the original nota
             
             // Use current time for the transaction
@@ -415,6 +509,9 @@ class PembelianController extends Controller
             
             // Get the original items to remove from inventory
             $originalItems = PembelianItem::where('nota', $nota)->get();
+
+            // Reverse FIFO batches before touching stocks/panels
+            $this->reverseUnusedStockBatches($originalItems, $nota, 'diedit');
             
             // Track panels to delete
             $panelsToDelete = [];
@@ -425,7 +522,7 @@ class PembelianController extends Controller
                 $panels = Panel::where('group_id', $item->kode_barang)
                     ->where('available', true)
                     ->orderBy('created_at', 'desc') // Get the most recently added first (likely from this purchase)
-                    ->limit($item->qty)
+                    ->limit((int) $item->qty)
                     ->get();
                 
                 foreach ($panels as $panel) {
@@ -458,7 +555,7 @@ class PembelianController extends Controller
                 'tanggal' => $tanggalWithTime, // Use date with time
                 'kode_supplier' => $request->kode_supplier,
                 'no_surat_jalan' => $request->no_surat_jalan,
-                'pembayaran' => $request->metode_pembayaran ?? 'Tunai', // Updated field name
+                'pembayaran' => $request->pembayaran ?? $request->metode_pembayaran ?? 'Tunai',
                 'cara_bayar' => $request->cara_bayar,
                 'subtotal' => $request->subtotal,
                 'diskon' => $request->diskon ?? 0,
@@ -476,17 +573,41 @@ class PembelianController extends Controller
             
             // Create new purchase items and add new inventory
             foreach ($request->items as $item) {
-                PembelianItem::create([
+                // Resolve satuan besar/kecil into base-unit quantity & price
+                $kodeBarang = KodeBarang::where('kode_barang', $item['kodeBarang'])->first();
+                $conv = $kodeBarang
+                    ? $this->resolveUnitConversion($kodeBarang, $item)
+                    : ['qty_base' => (float) $item['qty'], 'harga_base' => (float) $item['harga'], 'satuan' => 'LBR', 'satuan_besar' => null, 'qty_besar' => null];
+
+                $qtyBase = $conv['qty_base'];
+                $hargaBase = $conv['harga_base'];
+
+                $pembelianItem = PembelianItem::create([
                     'nota' => $nota,
                     'kode_barang' => $item['kodeBarang'],
                     'nama_barang' => $item['namaBarang'],
                     'keterangan' => $item['keterangan'] ?? null,
-                    'harga' => $item['harga'],
-                    'qty' => $item['qty'],
+                    'harga' => $hargaBase,
+                    'qty' => $qtyBase,
+                    'satuan' => $conv['satuan'],
+                    'satuan_besar' => $conv['satuan_besar'],
+                    'qty_besar' => $conv['qty_besar'],
                     'diskon' => $item['diskon'] ?? 0,
                     'total' => $item['total'],
                     'created_at' => $currentDateTime,
                 ]);
+
+                if ($kodeBarang) {
+                    $this->createStockBatchForItem(
+                        $pembelianItem,
+                        $kodeBarang,
+                        $qtyBase,
+                        $hargaBase,
+                        $request->tanggal,
+                        $nota,
+                        $supplierName
+                    );
+                }
                 
                 // Record new purchase in stock mutation
                 $this->stockController->recordPurchase(
@@ -496,63 +617,37 @@ class PembelianController extends Controller
                     $tanggalWithTime, // Use date with time
                     $nota . ' (updated)',
                     $supplierName . ' (' . $request->kode_supplier . ')',
-                    $item['qty'],
-                    'LBR', // Unit of measure
+                    $qtyBase,
+                    $conv['satuan'], // Unit of measure (base unit)
                     'Purchase transaction update', // Keterangan
                     $editor, // Created by
                     'default' // Stock owner
                 );
                 
-                // Get the kode barang record
-                $kodeBarang = KodeBarang::where('kode_barang', $item['kodeBarang'])->first();
-                
                 if ($kodeBarang) {
-                    // Get a panel instance with this kode_barang to use as a template
-                    $templatePanel = Panel::where('group_id', $item['kodeBarang'])->first();
-                    
-                    // Default values if no template exists
+                    // Prefer the edited nama barang for new panels
                     $panelName = $item['namaBarang'];
-                    // $length = $kodeBarang->length ?? 0;
-                    $cost = $item['harga']; // Use purchase price as cost
-                    $price = $templatePanel ? $templatePanel->price : ($item['harga'] * 1.2); // 20% markup if no template
-                    
-                    // If template exists, use its values
-                    if ($templatePanel) {
-                        $panelName = $templatePanel->name;
-                        // $length = $templatePanel->length ?? $length;
-                        $price = $templatePanel->price;
-                    }
+                    $cost = $hargaBase; // Use purchase price (per base unit) as cost
                     
                     // Use the PanelController to add panels to inventory
                     $panelController = app()->make(PanelController::class);
                     
-                    // Check if the method accepts the timestamp parameter
-                    try {
-                        $result = $panelController->addPanelsToInventory(
-                            $panelName, 
-                            $cost, 
-                            $item['kodeBarang'], 
-                            (int) $item['qty']
-                        );
-                    } catch (\ArgumentCountError $e) {
-                        // If the method doesn't accept the timestamp, use the original method
-                        $result = $panelController->addPanelsToInventory(
-                            $panelName, 
-                            $cost, 
-                            $item['kodeBarang'], 
-                            (int) $item['qty']
-                        );
-                    }
+                    $result = $panelController->addPanelsToInventory(
+                        $panelName, 
+                        $cost, 
+                        $item['kodeBarang'], 
+                        (int) $qtyBase
+                    );
                     
                     // Log the result
                     Log::info('Added panels to inventory during update:', ['result' => $result]);
                     
-                    // Update cost di master barang dengan harga pembelian terbaru
-                    $kodeBarang->cost = $item['harga'];
+                    // Update cost di master barang dengan harga pembelian terbaru (per base unit)
+                    $kodeBarang->cost = $hargaBase;
                     $kodeBarang->save();
                     Log::info('Updated master barang cost during update:', [
                         'kode_barang' => $item['kodeBarang'],
-                        'new_cost' => $item['harga']
+                        'new_cost' => $hargaBase
                     ]);
                 } else {
                     Log::warning('KodeBarang not found for updated purchase item:', ['kode_barang' => $item['kodeBarang']]);
@@ -604,6 +699,9 @@ class PembelianController extends Controller
             
             // Get the items to remove from inventory
             $items = PembelianItem::where('nota', $nota)->get();
+
+            // Reverse FIFO batches before deleting
+            $this->reverseUnusedStockBatches($items, $nota, 'dihapus');
             
             // Track panels to delete
             $panelsToDelete = [];
@@ -613,7 +711,7 @@ class PembelianController extends Controller
                 $panels = Panel::where('group_id', $item->kode_barang)
                     ->where('available', true)
                     ->orderBy('created_at', 'desc') // Get the most recently added first (likely from this purchase)
-                    ->limit($item->qty)
+                    ->limit((int) $item->qty)
                     ->get();
                 
                 foreach ($panels as $panel) {
@@ -695,6 +793,9 @@ class PembelianController extends Controller
             
             // Get the items to replenish inventory
             $items = PembelianItem::where('nota', $nota)->get();
+
+            // Reverse FIFO batches (also blocks cancel if stock already sold)
+            $this->reverseUnusedStockBatches($items, $nota, 'dibatalkan');
             
             // Track panels to mark as unavailable
             $panelsToCancel = [];
@@ -707,7 +808,7 @@ class PembelianController extends Controller
                 $panels = Panel::where('group_id', $item->kode_barang)
                     ->where('available', true)
                     ->orderBy('created_at', 'desc') // Get the most recently added first (likely from this purchase)
-                    ->limit($item->qty)
+                    ->limit((int) $item->qty)
                     ->get();
                 
                 foreach ($panels as $panel) {

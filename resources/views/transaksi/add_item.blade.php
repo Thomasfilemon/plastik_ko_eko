@@ -55,7 +55,8 @@
                 <div class="col-md-6">
                     <div class="form-group">
                         <label for="quantity">Quantity</label>
-                        <input type="number" class="form-control" id="quantity" name="quantity" value="1" min="1" required>
+                        <input type="number" class="form-control" id="quantity" name="quantity" value="1" min="0.01" step="0.01" required>
+                        <small class="form-text text-muted" id="qtyConversionHint" style="display:none;"></small>
                         <small id="qtyError" class="text-danger" style="display:none;"></small>
                     </div>
                 </div>
@@ -125,20 +126,24 @@
 </form>
 
 <script>
-    // Validasi input quantity barang
+    // Validasi input quantity barang (stok dalam satuan kecil)
     function validateQuantity() {
-        const qty = parseInt($('#quantity').val()) || 0;
+        const qty = parseFloat($('#quantity').val()) || 0;
         const stokRaw = $('#stock_tersedia').val();
-        const stok = stokRaw === '' ? null : (parseInt(stokRaw) || 0);
+        const stok = stokRaw === '' ? null : (parseFloat(stokRaw) || 0);
+        const factors = $('#addItemForm').data('unit-factors') || {};
+        const satuanBesar = $('#satuanBesar').val() || '';
+        const factor = satuanBesar ? (parseFloat(factors[satuanBesar]) || 1) : 1;
+        const qtyKecil = qty * (factor > 0 ? factor : 1);
         let valid = true;
         let msg = '';
 
         if (qty <= 0) {
             valid = false;
             msg = 'Quantity harus lebih dari 0.';
-        } else if (stok !== null && stok > 0 && qty > stok) {
+        } else if (stok !== null && stok > 0 && qtyKecil > stok) {
             valid = false;
-            msg = 'Quantity tidak boleh melebihi stok tersedia.';
+            msg = `Quantity melebihi stok tersedia (${stok} satuan kecil).`;
         }
 
         if (!valid) {
@@ -153,8 +158,8 @@
         return valid;
     }
 
-    // Jalankan validasi saat quantity atau stok berubah
-    $('#quantity, #stock_tersedia').on('input change', function() {
+    // Jalankan validasi saat quantity, stok, atau satuan berubah
+    $('#quantity, #stock_tersedia, #satuanBesar').on('input change', function() {
         validateQuantity();
     });
 
@@ -184,6 +189,7 @@
             if (!kodeBarangId) {
                 $('#satuanKecil').html('<option value="LBR">LBR</option>');
                 $('#satuanBesar').html('');
+                $('#addItemForm').data('unit-factors', { LBR: 1 });
                 return;
             }
             $.ajax({
@@ -193,24 +199,34 @@
                     const kecil = $('#satuanKecil');
                     const besar = $('#satuanBesar');
                     kecil.empty();
-                    besar.empty();
+                    besar.empty().append('<option value="">- (pakai satuan kecil)</option>');
                     const base = unitDasar || 'LBR';
+                    const unitList = Array.isArray(units) ? units : (units.units || []);
+                    const factors = Array.isArray(units) ? {} : (units.factors || {});
+                    const factorMap = Object.assign({ [base]: 1 }, factors);
+                    $('#addItemForm').data('unit-factors', factorMap);
                     kecil.append('<option value="'+base+'">'+base+'</option>');
-                    if (Array.isArray(units) && units.length > 0) {
-                        units.forEach(function(u){ if (u !== base) { besar.append('<option value="'+u+'">'+u+'</option>'); } });
-                    }
+                    unitList.forEach(function(u){
+                        if (u !== base) {
+                            const factor = factorMap[u] || 1;
+                            besar.append(`<option value="${u}">${u} (1 = ${factor} ${base})</option>`);
+                        }
+                    });
                     kecil.val(base);
+                    updatePreview();
                 },
                 error: function() {
                     $('#satuanKecil').html('<option value="LBR">LBR</option>');
                     $('#satuanBesar').html('');
+                    $('#addItemForm').data('unit-factors', { LBR: 1 });
                 }
             });
         }
 
         function triggerHargaOngkosUpdate() {
             const kodeBarangId = $('#kode_barang_id').val();
-            const satuan = $('#satuanBesar').val() || $('#satuanKecil').val();
+            // Harga selalu berdasarkan satuan kecil
+            const satuan = $('#satuanKecil').val();
             const customerId = $('#kode_customer').val();
             if (kodeBarangId && satuan && customerId) {
                 $.ajax({
@@ -232,21 +248,37 @@
             }
         }
 
+        function getAddItemFactor() {
+            const satuanBesar = $('#satuanBesar').val() || '';
+            if (!satuanBesar) return 1;
+            const factors = $('#addItemForm').data('unit-factors') || {};
+            const factor = parseFloat(factors[satuanBesar]);
+            return factor > 0 ? factor : 1;
+        }
+
         function updatePreview() {
             const kodeBarang = $('#kode_barang').val() || '-';
             const keterangan = $('#keterangan').val() || '-';
-            const harga = parseInt($('#harga').val()) || 0;
-            // const panjang = parseInt($('#panjang').val()) || 0;
+            const harga = parseFloat($('#harga').val()) || 0; // per satuan kecil
             const lebar = parseInt($('#lebar').val()) || 0;
-            const quantity = parseInt($('#quantity').val()) || 0;
+            const quantity = parseFloat($('#quantity').val()) || 0;
             const satuanKecil = $('#satuanKecil').val();
             const satuanBesar = $('#satuanBesar').val();
             const diskon = parseInt($('#diskon').val()) || 0;
+            const factor = getAddItemFactor();
+            const qtyKecil = quantity * factor;
 
-            // Calculate values
-            const subTotal = harga * quantity;
+            // Total = qty(besar) × factor × harga kecil
+            const subTotal = harga * qtyKecil;
             const diskonAmount = (diskon / 100) * subTotal;
             const total = subTotal - diskonAmount;
+
+            const hint = $('#qtyConversionHint');
+            if (satuanBesar && quantity > 0 && factor > 1) {
+                hint.text(`${quantity} ${satuanBesar} = ${qtyKecil} ${satuanKecil || 'satuan kecil'} (harga × ${satuanKecil || 'kecil'})`).show();
+            } else {
+                hint.hide().text('');
+            }
 
             // Update preview
             const tbody = $('#itemPreview');
@@ -258,7 +290,7 @@
                     <td>${keterangan}</td>
                     <td class="text-right">${formatCurrency(harga)}</td>
                     <td>-</td> <!-- kolom Length sementara -->
-                    <td>${quantity}</td>
+                    <td>${quantity}${satuanBesar ? ` ${satuanBesar} (=${qtyKecil} ${satuanKecil||''})` : ''}</td>
                     <td class="text-right">${formatCurrency(total)}</td>
                     <td>${satuanKecil}</td>
                     <td>${satuanBesar || '-'}</td>

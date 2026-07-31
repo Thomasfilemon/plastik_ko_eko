@@ -181,6 +181,37 @@ class UnitConversionService
     }
 
     /**
+     * Units + conversion factors to base unit (1 besar = N kecil).
+     *
+     * @return array{units: array<int, string>, factors: array<string, float>}
+     */
+    public function getAvailableUnitsWithFactors(int $kodeBarangId): array
+    {
+        $kodeBarang = KodeBarang::find($kodeBarangId);
+        if (!$kodeBarang) {
+            return ['units' => [], 'factors' => []];
+        }
+
+        $unitDasar = $kodeBarang->unit_dasar ?? 'LBR';
+        $units = [$unitDasar];
+        $factors = [$unitDasar => 1.0];
+
+        $conversions = UnitConversion::where('kode_barang_id', $kodeBarangId)
+            ->active()
+            ->get();
+
+        foreach ($conversions as $conversion) {
+            $units[] = $conversion->unit_turunan;
+            $factors[$conversion->unit_turunan] = (float) $conversion->nilai_konversi;
+        }
+
+        return [
+            'units' => array_values(array_unique($units)),
+            'factors' => $factors,
+        ];
+    }
+
+    /**
      * Validasi apakah unit valid untuk barang tertentu
      * 
      * @param int $kodeBarangId

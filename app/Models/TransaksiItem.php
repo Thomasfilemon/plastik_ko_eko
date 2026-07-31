@@ -35,6 +35,8 @@ class TransaksiItem extends Model
         'qty_return',
         'qty_sisa',
         'satuan',
+        'satuan_besar',
+        'qty_besar',
         'diskon',
         'total',
         'ongkos_kuli',

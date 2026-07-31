@@ -194,8 +194,9 @@ $(document).ready(function() {
 					url: `{{ route('sales-order.available-units', '') }}/${kodeBarangId}`,
 					method: 'GET',
 					success: function(units) {
-						if (Array.isArray(units) && units.length > 0) {
-							units.forEach(function(unit) {
+						const unitList = Array.isArray(units) ? units : (units.units || []);
+						if (unitList.length > 0) {
+							unitList.forEach(function(unit) {
 								if (unit !== unitDasar) {
 									besarSelect.append('<option value="'+unit+'">'+unit+'</option>');
 								}

@@ -26,6 +26,17 @@
                 @method('PUT')
                 
                 <div class="form-group row">
+                    <label for="name" class="col-sm-3 col-form-label">Nama Barang</label>
+                    <div class="col-sm-9">
+                        <input type="text" class="form-control @error('name') is-invalid @enderror" id="name" name="name" value="{{ old('name', $code->name) }}" required>
+                        @error('name')
+                            <div class="invalid-feedback">{{ $message }}</div>
+                        @enderror
+                        <small class="form-text text-muted">Nama barang bisa diubah jika ada kesalahan penulisan.</small>
+                    </div>
+                </div>
+
+                <div class="form-group row">
                     <label for="grup_barang_id" class="col-sm-3 col-form-label">Grup Barang</label>
                     <div class="col-sm-9">
                         <select class="form-control @error('grup_barang_id') is-invalid @enderror" id="grup_barang_id" name="grup_barang_id" required>
@@ -68,17 +79,20 @@
                 <div class="form-group row">
                     <label for="unit_dasar" class="col-sm-3 col-form-label">Satuan Kecil</label>
                     <div class="col-sm-9">
-                        <select class="form-control @error('unit_dasar') is-invalid @enderror" id="unit_dasar" name="unit_dasar" required>
-                            <option value="">Pilih Satuan Kecil</option>
-                            <option value="LBR" {{ old('unit_dasar', $code->unit_dasar) == 'LBR' ? 'selected' : '' }}>LBR (Lembar)</option>
-                            <option value="KG" {{ old('unit_dasar', $code->unit_dasar) == 'KG' ? 'selected' : '' }}>KG (Kilogram)</option>
-                            <option value="M" {{ old('unit_dasar', $code->unit_dasar) == 'M' ? 'selected' : '' }}>M (Meter)</option>
-                            <option value="PCS" {{ old('unit_dasar', $code->unit_dasar) == 'PCS' ? 'selected' : '' }}>PCS (Pieces)</option>
-                            <option value="PAK" {{ old('unit_dasar', $code->unit_dasar) == 'PAK' ? 'selected' : '' }}>PAK (Pack)</option>
-                        </select>
+                        <input type="text" class="form-control @error('unit_dasar') is-invalid @enderror" id="unit_dasar" name="unit_dasar" value="{{ old('unit_dasar', $code->unit_dasar) }}" list="satuan_kecil_suggestions" placeholder="Ketik satuan kecil (mis. LBR, KG, ROLL)" maxlength="20" required>
+                        <datalist id="satuan_kecil_suggestions">
+                            <option value="LBR"></option>
+                            <option value="KG"></option>
+                            <option value="M"></option>
+                            <option value="PCS"></option>
+                            <option value="PAK"></option>
+                            <option value="BOX"></option>
+                            <option value="ROLL"></option>
+                        </datalist>
                         @error('unit_dasar')
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
+                        <small class="form-text text-muted">Ketik satuan sendiri atau pilih dari saran.</small>
                     </div>
                 </div>
 

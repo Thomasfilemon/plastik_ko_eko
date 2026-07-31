@@ -110,12 +110,16 @@ $(document).ready(function () {
                 success: function (units) {
                     const satuanBesarSelect = row.find('.item-satuan-besar');
                     satuanBesarSelect.empty();
-                    // satuanBesarSelect.append('<option value="">Pilih Satuan Besar</option>');
-                    
-                    if (units && units.length > 0) {
-                        units.forEach(unit => {
+                    satuanBesarSelect.append('<option value="">- (pakai satuan kecil)</option>');
+                    const unitList = Array.isArray(units) ? units : (units.units || []);
+                    const factors = Array.isArray(units) ? {} : (units.factors || {});
+                    row.data('unit-factors', Object.assign({ [unitDasar]: 1 }, factors));
+
+                    if (unitList.length > 0) {
+                        unitList.forEach(unit => {
                             if (unit !== unitDasar) {
-                                satuanBesarSelect.append(`<option value="${unit}">${unit}</option>`);
+                                const factor = factors[unit] || 1;
+                                satuanBesarSelect.append(`<option value="${unit}">${unit} (1 = ${factor} ${unitDasar})</option>`);
                             }
                         });
                     }
@@ -150,16 +154,18 @@ $(document).ready(function () {
 
     $(document).on('change', '.item-satuan-besar', function() {
         const row = $(this).closest('.item-row');
-        const unit = $(this).val();
-        row.find('.item-satuan').val(unit);
+        // Qty boleh dalam satuan besar; harga tetap per satuan kecil
         calculateItemTotal(row);
     });
 
-    // Calculate item total
+    // Calculate item total — qty satuan besar dikonversi ke kecil untuk total
     function calculateItemTotal(row) {
         const qty = parseFloat(row.find('.item-qty').val()) || 0;
         const harga = parseFloat(row.find('.item-harga').val()) || 0;
-        const total = qty * harga;
+        const satuanBesar = row.find('.item-satuan-besar').val() || '';
+        const factors = row.data('unit-factors') || {};
+        const factor = satuanBesar ? (parseFloat(factors[satuanBesar]) || 1) : 1;
+        const total = qty * factor * harga;
         row.find('.item-total').val(total);
     }
 
@@ -173,10 +179,13 @@ $(document).ready(function () {
         const namaBarang = selectedOption.data('nama');
         const kodeBarangId = kodeBarangSelect.val();
         const keterangan = row.find('#keterangan').val();
-        const harga = parseFloat(row.find('.item-harga').val()) || 0;
+        const harga = parseFloat(row.find('.item-harga').val()) || 0; // per satuan kecil
         const qty = parseFloat(row.find('.item-qty').val()) || 0;
-        const satuan = row.find('.item-satuan').val();
+        const satuanKecil = row.find('.item-satuan-kecil').val();
         const satuanBesar = row.find('.item-satuan-besar').val();
+        const satuan = satuanBesar ? satuanBesar : satuanKecil;
+        const factors = row.data('unit-factors') || {};
+        const factor = satuanBesar ? (parseFloat(factors[satuanBesar]) || 1) : 1;
         const diskon = parseFloat(row.find('#diskon').val()) || 0;
         const panjang = parseFloat(row.find('#panjang').val()) || 0;
 
@@ -185,17 +194,22 @@ $(document).ready(function () {
             return;
         }
 
-        // Calculate total
-        const subtotal = harga * qty;
+        // Total = qty (besar) × factor × harga kecil
+        const qtyKecil = qty * factor;
+        const subtotal = harga * qtyKecil;
         const diskonAmount = (subtotal * diskon) / 100;
         const total = subtotal - diskonAmount;
 
         const newItem = {
             kodeBarang,
+            kodeBarangId,
             namaBarang,
             keterangan,
             harga: harga,
             qty,
+            qtyKecil,
+            unitFactor: factor,
+            satuanKecil,
             satuan,
             satuanBesar,
             diskon,
@@ -227,11 +241,14 @@ $(document).ready(function () {
                     <td>${item.keterangan || '-'}</td>
                     <td class="text-right">${formatCurrency(item.harga)}</td>
                     <td>${item.qty} ${item.satuan || 'LBR'}</td>
-                    <td>${item.satuanBesar || 'BOX'}</td>
+                    <td>${item.satuanBesar || '-'}</td>
                     <td class="text-right">${formatCurrency(item.total)}</td>
                     <td class="text-center">${item.panjang || '-'}</td>
                     <td class="text-right">${item.diskon || 0}%</td>
                     <td>
+                        <button type="button" class="btn btn-sm btn-primary edit-item" data-index="${index}">
+                            <i class="fas fa-edit"></i>
+                        </button>
                         <button type="button" class="btn btn-sm btn-danger remove-item" data-index="${index}">
                             <i class="fas fa-trash"></i>
                         </button>
@@ -247,7 +264,101 @@ $(document).ready(function () {
             renderItems();
             calculateTotals();
         });
+
+        // Edit item handling
+        $(".edit-item").click(function () {
+            openEditItemModal($(this).data("index"));
+        });
     }
+
+    // Populate & open the edit modal for a line item
+    function openEditItemModal(index) {
+        const item = items[index];
+        if (!item) return;
+
+        $('#edit_item_index').val(index);
+        $('#edit_item_nama').val(item.namaBarang || '');
+        $('#edit_item_qty').val(item.qty);
+        $('#edit_item_harga').val(item.harga);
+        $('#edit_item_satuan_kecil').val(item.satuanKecil || item.satuan || 'LBR');
+        $('#edit_item_diskon').val(item.diskon || 0);
+        $('#edit_item_panjang').val(item.panjang || 0);
+        $('#edit_item_keterangan').val(item.keterangan || '');
+
+        // Build satuan besar options
+        const besarSelect = $('#edit_item_satuan_besar');
+        besarSelect.empty();
+        besarSelect.append('<option value="">- (pakai satuan kecil)</option>');
+
+        const unitDasar = item.satuanKecil || item.satuan || 'LBR';
+        if (item.kodeBarangId && window.availableUnitsUrl) {
+            $.ajax({
+                url: `${window.availableUnitsUrl}/${item.kodeBarangId}`,
+                method: 'GET',
+                success: function (units) {
+                    if (Array.isArray(units)) {
+                        units.forEach(u => {
+                            if (u !== unitDasar) {
+                                besarSelect.append(`<option value="${u}">${u}</option>`);
+                            }
+                        });
+                    }
+                    besarSelect.val(item.satuanBesar || '');
+                },
+                error: function () {
+                    if (item.satuanBesar) {
+                        besarSelect.append(`<option value="${item.satuanBesar}">${item.satuanBesar}</option>`);
+                    }
+                    besarSelect.val(item.satuanBesar || '');
+                }
+            });
+        } else if (item.satuanBesar) {
+            besarSelect.append(`<option value="${item.satuanBesar}">${item.satuanBesar}</option>`);
+            besarSelect.val(item.satuanBesar);
+        }
+
+        $('#editItemModal').modal('show');
+    }
+
+    // Save edited item
+    $('#saveEditItemBtn').click(function () {
+        const index = parseInt($('#edit_item_index').val(), 10);
+        const item = items[index];
+        if (!item) return;
+
+        const qty = parseFloat($('#edit_item_qty').val()) || 0;
+        const harga = parseFloat($('#edit_item_harga').val()) || 0;
+        const diskon = parseFloat($('#edit_item_diskon').val()) || 0;
+        const panjang = parseFloat($('#edit_item_panjang').val()) || 0;
+        const keterangan = $('#edit_item_keterangan').val();
+        const satuanKecil = item.satuanKecil || item.satuan || 'LBR';
+        const satuanBesar = $('#edit_item_satuan_besar').val();
+
+        if (!qty || harga === undefined) {
+            alert('Mohon lengkapi qty dan harga!');
+            return;
+        }
+
+        const subtotal = harga * qty;
+        const total = subtotal - (subtotal * diskon) / 100;
+
+        items[index] = Object.assign({}, item, {
+            namaBarang: $('#edit_item_nama').val() || item.namaBarang,
+            qty,
+            harga,
+            diskon,
+            panjang,
+            keterangan,
+            satuanKecil,
+            satuanBesar,
+            satuan: satuanBesar ? satuanBesar : satuanKecil,
+            total
+        });
+
+        $('#editItemModal').modal('hide');
+        renderItems();
+        calculateTotals();
+    });
 
     // Calculate all totals
     function calculateTotals() {

@@ -14,6 +14,7 @@ use App\Services\CustomerCreditService;
 use App\Services\FifoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Exception;
 
 class SalesOrderController extends Controller
@@ -431,8 +432,8 @@ class SalesOrderController extends Controller
     public function getAvailableUnits($kodeBarangId)
     {
         try {
-            $units = $this->unitService->getAvailableUnits($kodeBarangId);
-            return response()->json($units);
+            $payload = $this->unitService->getAvailableUnitsWithFactors((int) $kodeBarangId);
+            return response()->json($payload);
         } catch (Exception $e) {
             return response()->json(['error' => $e->getMessage()], 400);
         }
@@ -472,7 +473,7 @@ class SalesOrderController extends Controller
         $items = $salesOrder->items()->with('kodeBarang')->get();
         
         // Debug logging
-        \Log::info('Sales Order Items API Response:', [
+        Log::info('Sales Order Items API Response:', [
             'sales_order_id' => $salesOrder->id,
             'items_count' => $items->count(),
             'items' => $items->toArray()

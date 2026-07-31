@@ -136,10 +136,13 @@
                                     </a>
                                     
                                     @if(!isset($purchase->status) || $purchase->status != 'canceled')
+                                        @can('edit pembelian')
                                         <a href="{{ route('pembelian.edit', $purchase->id) }}" class="btn btn-sm btn-warning" title="Edit Nota">
                                             <i class="fas fa-edit"></i>
                                         </a>
+                                        @endcan
                                         
+                                        @can('cancel pembelian')
                                         <button type="button" class="btn btn-sm btn-danger cancel-btn" 
                                                 data-toggle="modal" 
                                                 data-target="#cancelModal" 
@@ -148,6 +151,7 @@
                                                 title="Batalkan Nota">
                                             <i class="fas fa-ban"></i>
                                         </button>
+                                        @endcan
                                     @endif
                                     
                                     @if(isset($purchase->is_edited) && $purchase->is_edited)

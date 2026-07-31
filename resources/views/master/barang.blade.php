@@ -9,9 +9,11 @@
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
             <div>
+                @can('manage kode barang')
                 <a href="{{ route('code.create-code') }}" class="btn btn-primary btn-sm me-2">
                     <i class="fas fa-plus mr-1"></i> Tambah Barang
                 </a>
+                @endcan
             </div>
 
             <div>
@@ -100,11 +102,15 @@
                                         </td>
                                         <td>
                                             <div class="btn-group" role="group">
-                                                <form action="{{ route('panels.edit-inventory', ['id' => $item['group_id']]) }}" method="GET">
-                                                    @csrf
-                                                    <button class="btn btn-sm btn-success"><i class="fas fa-edit"></i> Edit</button>
-                                                </form>
-                                                <form action="{{ route('panels.delete-inventory', ['id' => $item['group_id']]) }}" method="POST">
+                                                <button type="button" class="btn btn-sm btn-success btn-edit-barang"
+                                                    data-id="{{ $item['id'] ?? '' }}"
+                                                    data-group-id="{{ $item['group_id'] }}"
+                                                    data-name="{{ $item['name'] }}"
+                                                    data-status="{{ $item['status'] }}"
+                                                    data-quantity="{{ $item['quantity'] }}">
+                                                    <i class="fas fa-edit"></i> Edit
+                                                </button>
+                                                <form action="{{ route('panels.delete-inventory', ['id' => $item['group_id']]) }}" method="POST" onsubmit="return confirm('Hapus barang ini secara permanen? Tindakan ini tidak dapat dibatalkan.');">
                                                     @csrf
                                                     <button class="btn btn-sm btn-danger"><i class="fas fa-trash"></i> Hapus</button>
                                                 </form>
@@ -122,6 +128,7 @@
                             <tfoot>
                             <tr class="table-primary">
                                 <th colspan="4" class="text-end">Total</th>
+                                @can('view-total-harga')
                                 <th>
                                     @php
                                         $totalCost = 0;
@@ -140,6 +147,10 @@
                                         echo 'Rp. ' . number_format($totalPrice);
                                     @endphp
                                 </th>
+                                @else
+                                <th class="text-muted">-</th>
+                                <th class="text-muted">-</th>
+                                @endcan
                                 <th>
                                     @php
                                         $totalQuantity = 0;
@@ -149,8 +160,8 @@
                                         echo $totalQuantity;
                                     @endphp
                                 </th>
-                                <th></th> <!-- kolom Satuan Dasar -->
-                                <th></th> <!-- kolom Satuan Besar -->
+                                <th></th>
+                                <th></th>
                                 <th colspan="2"></th>
                             </tr>
                             </tfoot>
@@ -170,6 +181,56 @@
         </div>
     </div>
 </section>
+
+<!-- Edit Barang Modal (inline, no page navigation) -->
+<div class="modal fade" id="editBarangModal" tabindex="-1" role="dialog" aria-labelledby="editBarangModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <form id="editBarangForm" action="{{ route('panels.update-inventory') }}" method="POST">
+                @csrf
+                <input type="hidden" name="group_id" id="eb_group_id">
+                <input type="hidden" name="quantity" id="eb_quantity">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editBarangModalLabel">Edit Barang</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="eb_name">Nama Barang</label>
+                        <input type="text" class="form-control" name="name" id="eb_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="eb_kode">Kode Barang</label>
+                        <input type="text" class="form-control" id="eb_kode" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label for="eb_status">Status</label>
+                        <select class="form-control" name="status" id="eb_status">
+                            <option value="Active">Active</option>
+                            <option value="Inactive">Inactive</option>
+                        </select>
+                    </div>
+
+                    <hr/>
+                    <label><i class="fas fa-cogs mr-1"></i> Konversi Satuan Besar</label>
+                    <div id="eb_uc_list"></div>
+                    <div class="d-flex mt-2">
+                        <input type="text" id="eb_uc_unit_add" class="form-control mr-2" placeholder="Satuan Besar (mis. DUS)">
+                        <input type="number" id="eb_uc_value_add" class="form-control mr-2" placeholder="Isi per satuan kecil">
+                        <button type="button" id="eb_uc_add_btn" class="btn btn-success">Tambah</button>
+                    </div>
+                    <small class="form-text text-muted">Konversi satuan tersimpan otomatis saat ditambah/diubah.</small>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i> Simpan</button>
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Tutup</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 
 <style>
     .table-bordered th,
@@ -206,6 +267,138 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Tambahkan event listener untuk dropdown
     searchBySelect.addEventListener('change', updateSearchInputState);
+});
+</script>
+
+<script>
+$(function () {
+    const csrfToken = "{{ csrf_token() }}";
+    let currentKode = null;
+
+    // Open the edit modal and populate fields (no page navigation)
+    $(document).on('click', '.btn-edit-barang', function () {
+        const btn = $(this);
+        currentKode = btn.data('group-id');
+
+        $('#eb_group_id').val(currentKode);
+        $('#eb_kode').val(currentKode);
+        $('#eb_name').val(btn.data('name'));
+        $('#eb_quantity').val(btn.data('quantity'));
+        $('#eb_status').val(btn.data('status'));
+
+        loadUc();
+        $('#editBarangModal').modal('show');
+    });
+
+    function ucUrl(suffix) {
+        return `/unit-conversion/by-kode/${encodeURIComponent(currentKode)}${suffix || ''}`;
+    }
+
+    function renderUc(items) {
+        const list = $('#eb_uc_list');
+        if (!Array.isArray(items) || items.length === 0) {
+            list.html('<div class="text-muted">Belum ada konversi satuan besar.</div>');
+            return;
+        }
+        let html = '<table class="table table-sm mb-0"><thead><tr><th>Satuan Besar</th><th>Isi per Satuan Kecil</th><th>Status</th><th>Aksi</th></tr></thead><tbody>';
+        items.forEach(it => {
+            html += `<tr id="eb-uc-row-${it.id}">
+                <td>
+                    <span class="uc-display">${it.unit_turunan}</span>
+                    <input type="text" class="form-control form-control-sm uc-edit" id="eb-uc-unit-${it.id}" value="${it.unit_turunan}" style="display:none;">
+                </td>
+                <td>
+                    <span class="uc-display">${it.nilai_konversi}</span>
+                    <input type="number" class="form-control form-control-sm uc-edit" id="eb-uc-value-${it.id}" value="${it.nilai_konversi}" style="display:none;">
+                </td>
+                <td>${it.is_active ? 'Aktif' : 'Nonaktif'}</td>
+                <td>
+                    <span class="uc-display">
+                        <button type="button" class="btn btn-sm btn-primary" data-id="${it.id}" data-action="edit"><i class="fas fa-edit"></i></button>
+                        <button type="button" class="btn btn-sm btn-warning" data-id="${it.id}" data-action="toggle"><i class="fas fa-toggle-${it.is_active ? 'on' : 'off'}"></i></button>
+                        <button type="button" class="btn btn-sm btn-danger" data-id="${it.id}" data-action="delete"><i class="fas fa-trash"></i></button>
+                    </span>
+                    <span class="uc-edit" style="display:none;">
+                        <button type="button" class="btn btn-sm btn-success" data-id="${it.id}" data-action="save"><i class="fas fa-check"></i></button>
+                        <button type="button" class="btn btn-sm btn-secondary" data-id="${it.id}" data-action="cancel"><i class="fas fa-times"></i></button>
+                    </span>
+                </td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        list.html(html);
+    }
+
+    function loadUc() {
+        $('#eb_uc_list').html('<div class="text-muted">Memuat...</div>');
+        fetch(ucUrl(), { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(data => renderUc(data.items || []))
+            .catch(err => $('#eb_uc_list').html('<div class="text-danger">Gagal memuat konversi satuan.</div>'));
+    }
+
+    // Add conversion
+    $('#eb_uc_add_btn').on('click', function () {
+        const unit = ($('#eb_uc_unit_add').val() || '').trim();
+        const val = parseInt($('#eb_uc_value_add').val() || '0', 10);
+        if (!unit || val < 1) { alert('Isi satuan besar dan nilai konversi minimal 1.'); return; }
+
+        fetch(ucUrl(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken, 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+            body: JSON.stringify({ unit_turunan: unit, nilai_konversi: val })
+        })
+        .then(r => r.ok ? r.json() : Promise.reject(r.status))
+        .then(data => {
+            if (data.success) { $('#eb_uc_unit_add').val(''); $('#eb_uc_value_add').val(''); loadUc(); }
+            else { alert((data.errors ? Object.values(data.errors).flat().join(', ') : 'Gagal menambah konversi.')); }
+        })
+        .catch(() => alert('Gagal menambah konversi satuan.'));
+    });
+
+    // Row actions
+    $('#eb_uc_list').on('click', 'button[data-id]', function () {
+        const id = $(this).data('id');
+        const action = $(this).data('action');
+        const row = $(`#eb-uc-row-${id}`);
+
+        if (action === 'edit') {
+            row.find('.uc-display').hide();
+            row.find('.uc-edit').show();
+        } else if (action === 'cancel') {
+            row.find('.uc-display').show();
+            row.find('.uc-edit').hide();
+        } else if (action === 'save') {
+            const unit = ($(`#eb-uc-unit-${id}`).val() || '').trim();
+            const val = parseInt($(`#eb-uc-value-${id}`).val() || '0', 10);
+            if (!unit || val < 1) { alert('Isi satuan besar dan nilai konversi minimal 1.'); return; }
+            fetch(ucUrl(`/${id}`), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken, 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+                body: JSON.stringify({ unit_turunan: unit, nilai_konversi: val })
+            })
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(() => loadUc())
+            .catch(() => alert('Gagal mengubah konversi satuan.'));
+        } else if (action === 'toggle') {
+            fetch(ucUrl(`/${id}/toggle`), {
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': csrfToken, 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+            })
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(() => loadUc())
+            .catch(() => alert('Gagal mengubah status konversi.'));
+        } else if (action === 'delete') {
+            if (!confirm('Hapus satuan besar ini?')) return;
+            fetch(ucUrl(`/${id}`), {
+                method: 'DELETE',
+                headers: { 'X-CSRF-TOKEN': csrfToken, 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+            })
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(() => loadUc())
+            .catch(() => alert('Gagal menghapus konversi satuan.'));
+        }
+    });
 });
 </script>
 @endsection

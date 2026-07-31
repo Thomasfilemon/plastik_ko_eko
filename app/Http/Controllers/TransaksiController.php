@@ -27,12 +27,50 @@ use App\Models\StockBatch;
 
 class TransaksiController extends Controller
 {
-    protected $stockController;
-    protected $panelController;
+    protected StockController $stockController;
+    protected PanelController $panelController;
 
     public function __construct(StockController $stockController, PanelController $panelController){
         $this->stockController = $stockController;
         $this->panelController = $panelController;
+    }
+
+    /**
+     * Resolve satuan besar / satuan kecil into base-unit quantities.
+     *
+     * The qty is stored in base units (unit_dasar) so all FIFO, stock and panel
+     * logic keeps working unchanged, while the big-unit info is kept for the nota.
+     */
+    private function resolveUnitConversion($kodeBarangModel, array $item): array
+    {
+        $unitDasar = $kodeBarangModel->unit_dasar ?? 'LBR';
+        $qtyInput = (float) ($item['qty'] ?? 0);
+        $hargaInput = (float) ($item['harga'] ?? 0);
+        $satuanInput = $item['satuan'] ?? $unitDasar;
+        if ($satuanInput === '' || $satuanInput === null) {
+            $satuanInput = $unitDasar;
+        }
+
+        // Number of base units contained in 1 of the chosen unit
+        $factor = 1.0;
+        if ($satuanInput !== $unitDasar) {
+            $service = new UnitConversionService();
+            $factor = $service->convertToBaseUnit($kodeBarangModel->id, 1, $satuanInput);
+            if ($factor <= 0) {
+                $factor = 1.0;
+            }
+        }
+
+        $isBesar = ($satuanInput !== $unitDasar) && $factor > 1;
+
+        return [
+            'qty_base' => $qtyInput * $factor,
+            // Harga selalu per satuan kecil (unit dasar)
+            'harga_base' => $hargaInput,
+            'satuan' => $unitDasar,
+            'satuan_besar' => $isBesar ? $satuanInput : null,
+            'qty_besar' => $isBesar ? $qtyInput : null,
+        ];
     }
 
     // Helper function to check if payment method is cash
@@ -123,7 +161,7 @@ class TransaksiController extends Controller
         }
         
         // Debug: Log kodeBarangs count
-        \Log::info('KodeBarangs count: ' . $kodeBarangs->count());
+        Log::info('KodeBarangs count: ' . $kodeBarangs->count());
 
         // Cek apakah ada sales_order_id dari parameter
         $salesOrder = null;
@@ -174,7 +212,8 @@ class TransaksiController extends Controller
             $batasKredit = $customer->limit_kredit ?? 0;
             // dd($customer);
             $user = Auth::user();
-            $isOwner = $user->hasRole('admin');
+            /** @var User|null $user */
+            $isOwner = $user instanceof User && $user->hasRole('admin');
             // dd($isOwner);
 
              // Jika user bukan owner dan melebihi kredit → stop
@@ -256,22 +295,29 @@ class TransaksiController extends Controller
                     throw new \Exception("Kode barang {$item['kodeBarang']} tidak ditemukan");
                 }
 
+                // Resolve satuan besar/kecil into base-unit quantity & price
+                $conv = $this->resolveUnitConversion($kodeBarang, $item);
+                $qtyBase = $conv['qty_base'];
+
                 $stokTersedia = $fifoService->getStokTersedia($kodeBarang->id);
-                if ($stokTersedia < $item['qty']) {
-                    throw new \Exception("Stok tidak mencukupi untuk {$item['namaBarang']}. Tersedia: {$stokTersedia}, Dibutuhkan: {$item['qty']}");
+                if ($stokTersedia < $qtyBase) {
+                    throw new \Exception("Stok tidak mencukupi untuk {$item['namaBarang']}. Tersedia: {$stokTersedia}, Dibutuhkan: {$qtyBase}");
                 }
 
-                // Buat transaksi item
+                // Buat transaksi item (qty stored in base unit, big-unit info for nota)
                 $transaksiItem = TransaksiItem::create([
                     'transaksi_id' => $transaksi->id,
                     'no_transaksi' => $transaksi->no_transaksi,
                     'kode_barang' => $item['kodeBarang'],
                     'nama_barang' => $item['namaBarang'],
                     'keterangan' => $item['keterangan'] ?? null,
-                    'harga' => $item['harga'],
+                    'harga' => $conv['harga_base'],
                     // 'panjang' => $item['panjang'] ?? 0,
                     'lebar' => $item['lebar'] ?? 0,
-                    'qty' => $item['qty'],
+                    'qty' => $qtyBase,
+                    'satuan' => $conv['satuan'],
+                    'satuan_besar' => $conv['satuan_besar'],
+                    'qty_besar' => $conv['qty_besar'],
                     'diskon' => $item['diskon'] ?? 0,
                     'total' => $item['total'],
                     // Persist ongkos kuli from request (supports camelCase or snake_case)
@@ -279,13 +325,13 @@ class TransaksiController extends Controller
                 ]);
 
                 // Alokasi stok menggunakan FIFO
-                $alokasiResult = $fifoService->alokasiStok($kodeBarang->id, $item['qty'], $transaksiItem->id);
+                $alokasiResult = $fifoService->alokasiStok($kodeBarang->id, $qtyBase, $transaksiItem->id);
                 
                 // Log hasil alokasi untuk debugging
                 Log::info('FIFO Alokasi Result:', [
                     'transaksi_item_id' => $transaksiItem->id,
                     'kode_barang' => $item['kodeBarang'],
-                    'qty' => $item['qty'],
+                    'qty' => $qtyBase,
                     'alokasi' => $alokasiResult
                 ]);
 
@@ -297,9 +343,9 @@ class TransaksiController extends Controller
                     now(),
                     $transaksi->no_transaksi,
                     $customerName . ' (' . $request->kode_customer . ')',
-                    $item['qty'],
+                    $qtyBase,
                     $request->sales,
-                    'LBR'
+                    $conv['satuan']
                 );
             }
 
@@ -330,9 +376,14 @@ class TransaksiController extends Controller
             DB::commit();
 
             foreach ($request->items as $item){
+                $kodeBarangPanel = KodeBarang::where('kode_barang', $item['kodeBarang'])->first();
+                $qtyBasePanel = $kodeBarangPanel
+                    ? $this->resolveUnitConversion($kodeBarangPanel, $item)['qty_base']
+                    : (float) $item['qty'];
+
                 $panels = Panel::where('group_id', $item['kodeBarang'])
                 ->where('available', true)
-                ->limit($item['qty'])
+                ->limit((int) $qtyBasePanel)
                 ->get();
 
                 foreach ($panels as $panel){
@@ -363,7 +414,7 @@ class TransaksiController extends Controller
      */
     public function edit($id)
     {
-        $transaction = Transaksi::with(['items', 'customer'])->findOrFail($id);
+        $transaction = Transaksi::with(['items.kodeBarang', 'customer'])->findOrFail($id);
         
         // Check if transaction can be edited (only if not canceled)
         if (strpos($transaction->status, 'canceled') !== false) {
@@ -441,7 +492,7 @@ class TransaksiController extends Controller
                 $panels = Panel::where('group_id', $item->kode_barang)
                     ->where('available', false)
                     ->orderBy('created_at', 'desc')
-                    ->limit($item->qty)
+                    ->limit((int) ceil($item->qty))
                     ->get();
                 
                 foreach ($panels as $panel) {
@@ -509,34 +560,43 @@ class TransaksiController extends Controller
             // Create new transaction items and update stock
             $fifoService = new FifoService();
             foreach ($request->items as $item) {
-                // Create transaction item
+                // Resolve satuan besar/kecil into base-unit quantity & price
+                $kodeBarang = KodeBarang::where('kode_barang', $item['kodeBarang'])->first();
+                $conv = $kodeBarang
+                    ? $this->resolveUnitConversion($kodeBarang, $item)
+                    : ['qty_base' => (float) $item['qty'], 'harga_base' => (float) $item['harga'], 'satuan' => 'LBR', 'satuan_besar' => null, 'qty_besar' => null];
+                $qtyBase = $conv['qty_base'];
+
+                // Create transaction item (qty stored in base unit)
                 $transaksiItem = TransaksiItem::create([
                     'transaksi_id' => $transaksi->id,
                     'no_transaksi' => $noTransaksi,
                     'kode_barang' => $item['kodeBarang'],
                     'nama_barang' => $item['namaBarang'],
                     'keterangan' => $item['keterangan'] ?? null,
-                    'harga' => $item['harga'],
+                    'harga' => $conv['harga_base'],
                     // 'panjang' => $item['panjang'] ?? 0,
                     'lebar' => $item['lebar'] ?? 0,
-                    'qty' => $item['qty'],
+                    'qty' => $qtyBase,
+                    'satuan' => $conv['satuan'],
+                    'satuan_besar' => $conv['satuan_besar'],
+                    'qty_besar' => $conv['qty_besar'],
                     'diskon' => $item['diskon'] ?? 0,
                     'total' => $item['total'],
                 ]);
 
                 // Allocate stock using FIFO for the new/edited items
-                $kodeBarang = KodeBarang::where('kode_barang', $item['kodeBarang'])->first();
                 if ($kodeBarang) {
                     // Optional: validate available stock
                     $stokTersediaBaru = $fifoService->getStokTersedia($kodeBarang->id);
-                    if ($stokTersediaBaru < $item['qty']) {
-                        throw new \Exception("Stok tidak mencukupi untuk {$item['namaBarang']}. Tersedia: {$stokTersediaBaru}, Dibutuhkan: {$item['qty']}");
+                    if ($stokTersediaBaru < $qtyBase) {
+                        throw new \Exception("Stok tidak mencukupi untuk {$item['namaBarang']}. Tersedia: {$stokTersediaBaru}, Dibutuhkan: {$qtyBase}");
                     }
-                    $alokasiResultBaru = $fifoService->alokasiStok($kodeBarang->id, $item['qty'], $transaksiItem->id);
+                    $alokasiResultBaru = $fifoService->alokasiStok($kodeBarang->id, $qtyBase, $transaksiItem->id);
                     Log::info('FIFO Alokasi (UPDATE) Result:', [
                         'transaksi_item_id' => $transaksiItem->id,
                         'kode_barang' => $item['kodeBarang'],
-                        'qty' => $item['qty'],
+                        'qty' => $qtyBase,
                         'alokasi' => $alokasiResultBaru
                     ]);
                 }
@@ -549,15 +609,15 @@ class TransaksiController extends Controller
                     $currentDateTime,
                     $noTransaksi . ' (updated)',
                     $customerName . ' (' . $request->kode_customer . ')',
-                    $item['qty'],
+                    $qtyBase,
                     $transaksi->sales,
-                    'LBR'
+                    $conv['satuan']
                 );
                 
                 // Mark panels as unavailable
                 $availablePanels = Panel::where('group_id', $item['kodeBarang'])
                     ->where('available', true)
-                    ->limit($item['qty'])
+                    ->limit((int) $qtyBase)
                     ->get();
                 
                 foreach ($availablePanels as $panel) {
@@ -734,7 +794,7 @@ class TransaksiController extends Controller
                 // 1. Update Panel model availability
                 $panels = Panel::where('group_id', $item->kode_barang)
                     ->where('available', false)
-                    ->limit($item->qty)
+                    ->limit((int) ceil($item->qty))
                     ->get();
                     
                 foreach ($panels as $panel) {
@@ -796,7 +856,7 @@ class TransaksiController extends Controller
                     if ($so) {
                         // Kurangi qty_terkirim pada SO items berdasarkan transaksi items
                         foreach ($transaksi->items as $item) {
-                            $soItem = $so->items->firstWhere('kode_barang', $item->kode_barang);
+                            $soItem = collect($so->items)->firstWhere('kode_barang', $item->kode_barang);
                             if ($soItem && isset($soItem->qty_terkirim)) {
                                 $soItem->qty_terkirim = max(0, ($soItem->qty_terkirim - $item->qty));
                                 $soItem->save();
@@ -1165,7 +1225,7 @@ class TransaksiController extends Controller
 
         // Split items into chunks of 10 per page
         $itemsPerPage = 10;
-        $groupedItems = $transaction->items->chunk($itemsPerPage);
+        $groupedItems = collect($transaction->items)->chunk($itemsPerPage);
         
         return view('transaksi.nota', [
             'transaction' => $transaction,
@@ -1179,7 +1239,7 @@ class TransaksiController extends Controller
 
         // Split items into chunks of 10 per page
         $itemsPerPage = 10;
-        $groupedItems = $transaction->items->chunk($itemsPerPage);
+        $groupedItems = collect($transaction->items)->chunk($itemsPerPage);
 
         // Load the new print-specific view for PDF generation
         $pdf = Pdf::loadView('transaksi.print_nota', [ // Changed from 'transaksi.nota' to 'transaksi.print_nota'

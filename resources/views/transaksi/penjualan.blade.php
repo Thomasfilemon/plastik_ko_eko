@@ -164,6 +164,7 @@
                             <div class="form-group">
                                 <label>Qty</label>
                                 <input type="number" class="form-control item-qty" id="quantity" step="0.01" min="0.01">
+                                <small class="form-text text-muted item-qty-hint" style="display:none;"></small>
                             </div>
                         </div>
                         <div class="col-md-2">
@@ -387,6 +388,68 @@
 
 
 
+
+<!-- Edit Item Modal -->
+<div class="modal fade" id="editItemModal" tabindex="-1" role="dialog" aria-labelledby="editItemModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editItemModalLabel">Edit Barang</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit_item_index">
+                <div class="form-group">
+                    <label>Nama Barang</label>
+                    <input type="text" class="form-control" id="edit_item_nama">
+                </div>
+                <div class="row">
+                    <div class="col-md-6 form-group">
+                        <label>Qty</label>
+                        <input type="number" class="form-control" id="edit_item_qty" step="0.01" min="0.01">
+                        <small class="form-text text-muted" id="edit_item_qty_hint" style="display:none;"></small>
+                    </div>
+                    <div class="col-md-6 form-group">
+                        <label>Harga <small class="text-muted">(per satuan kecil)</small></label>
+                        <input type="number" class="form-control" id="edit_item_harga" step="0.01" min="0">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 form-group">
+                        <label>Satuan Kecil</label>
+                        <input type="text" class="form-control" id="edit_item_satuan_kecil" readonly>
+                    </div>
+                    <div class="col-md-6 form-group">
+                        <label>Satuan Besar</label>
+                        <select class="form-control" id="edit_item_satuan_besar"></select>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 form-group">
+                        <label>Diskon (%)</label>
+                        <input type="number" class="form-control" id="edit_item_diskon" min="0" max="100">
+                    </div>
+                    <div class="col-md-6 form-group">
+                        <label>Ongkos Kuli</label>
+                        <input type="number" class="form-control" id="edit_item_ongkos_kuli" step="0.01" min="0">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Keterangan</label>
+                    <input type="text" class="form-control" id="edit_item_keterangan">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="saveEditItemBtn">
+                    <i class="fas fa-save mr-1"></i> Simpan Perubahan
+                </button>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Tutup</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 
 <!-- Modal Invoice -->
@@ -983,21 +1046,24 @@
             kecilSelect.empty();
             besarSelect.empty();
             kecilSelect.append('<option value="'+unitDasarFromOption+'">'+unitDasarFromOption+'</option>');
+            besarSelect.append('<option value="">- (pakai satuan kecil)</option>');
             row.find('.item-satuan').val(unitDasarFromOption);
+            row.data('unit-factors', { [unitDasarFromOption]: 1 });
 
             const kodeBarangId = $(this).val();
             if (kodeBarangId) {
                 $.ajax({
                     url: `{{ route('sales-order.available-units', '') }}/${kodeBarangId}`,
                     method: 'GET',
-                    success: function(units) {
-                        if (Array.isArray(units) && units.length > 0) {
-                            units.forEach(function(unit) {
-                                if (unit !== unitDasarFromOption) {
-                                    besarSelect.append('<option value="'+unit+'">'+unit+'</option>');
-                                }
-                            });
-                        }
+                    success: function(res) {
+                        const parsed = normalizeUnitsResponse(res);
+                        row.data('unit-factors', parsed.factors);
+                        (parsed.units || []).forEach(function(unit) {
+                            if (unit !== unitDasarFromOption) {
+                                const factor = parsed.factors[unit] || 1;
+                                besarSelect.append(`<option value="${unit}" data-factor="${factor}">${unit} (1 = ${factor} ${unitDasarFromOption})</option>`);
+                            }
+                        });
                         calculateItemTotal(row);
                     },
                     error: function() {
@@ -1009,6 +1075,7 @@
                 row.find('.item-satuan-kecil').html('<option value=""></option>');
                 row.find('.item-satuan-besar').html('');
                 row.find('.item-satuan').val('');
+                row.find('.item-qty-hint').hide().text('');
                 calculateItemTotal(row);
             }
         });
@@ -1028,23 +1095,53 @@
             const row = $(this).closest('.item-row');
             const unit = $(this).val();
             row.find('.item-satuan').val(unit);
-            row.find('.item-satuan-besar').prop('selectedIndex', -1);
+            row.find('.item-satuan-besar').val('');
             calculateItemTotal(row);
         });
 
-        // Handle satuan besar change (do not overwrite small unit)
+        // Handle satuan besar change — qty diisi dalam satuan besar, harga tetap per satuan kecil
         $(document).on('change', '.item-satuan-besar', function() {
-            const row = $(this).closest('.item-row');
-            // Keep hidden .item-satuan as small unit; big unit is only for display/grouping
-            calculateItemTotal(row);
+            calculateItemTotal($(this).closest('.item-row'));
         });
+
+        function normalizeUnitsResponse(res) {
+            if (Array.isArray(res)) {
+                const factors = {};
+                res.forEach(u => { factors[u] = 1; });
+                return { units: res, factors };
+            }
+            return {
+                units: res.units || [],
+                factors: res.factors || {}
+            };
+        }
+
+        function getUnitFactor(row, unit) {
+            if (!unit) return 1;
+            const factors = row.data('unit-factors') || {};
+            const factor = parseFloat(factors[unit]);
+            return factor > 0 ? factor : 1;
+        }
 
         // Calculate item total
+        // Qty boleh dalam satuan besar; harga selalu per satuan kecil.
+        // Total = qty_input * factor * harga_kecil
         function calculateItemTotal(row) {
             const qty = parseFloat(row.find('.item-qty').val()) || 0;
             const harga = parseFloat(row.find('.item-harga').val()) || 0;
-            const total = qty * harga;
+            const satuanKecil = row.find('.item-satuan-kecil').val() || '';
+            const satuanBesar = row.find('.item-satuan-besar').val() || '';
+            const factor = satuanBesar ? getUnitFactor(row, satuanBesar) : 1;
+            const qtyKecil = qty * factor;
+            const total = qtyKecil * harga;
             row.find('.item-total').val(total);
+
+            const hint = row.find('.item-qty-hint');
+            if (satuanBesar && qty > 0 && factor > 1) {
+                hint.text(`${qty} ${satuanBesar} = ${qtyKecil} ${satuanKecil || 'satuan kecil'} (harga × ${satuanKecil || 'kecil'})`).show();
+            } else {
+                hint.hide().text('');
+            }
         }
 
         // Add Item Button
@@ -1057,42 +1154,37 @@
             const namaBarang = selectedOption.data('nama') || selectedOption.text().split(' - ')[1];
             const kodeBarangId = kodeBarangSelect.val();
             const keterangan = row.find('#keterangan').val();
-            const harga = parseFloat(row.find('.item-harga').val()) || 0;
+            const harga = parseFloat(row.find('.item-harga').val()) || 0; // always per satuan kecil
             const qty = parseFloat(row.find('.item-qty').val()) || 0;
-            const satuan = row.find('.item-satuan-kecil').val();
+            const satuanKecil = row.find('.item-satuan-kecil').val();
             const satuanBesar = row.find('.item-satuan-besar').val();
+            // If satuan besar dipilih, qty diinput dalam satuan besar; backend konversi ke kecil
+            const satuan = satuanBesar ? satuanBesar : satuanKecil;
+            const factor = satuanBesar ? getUnitFactor(row, satuanBesar) : 1;
             const diskon = parseFloat(row.find('#diskon').val()) || 0;
             const ongkosKuli = parseFloat(row.find('#ongkos_kuli').val()) || 0;
-
-            // Debug logging
-            console.log('Debug Add Item:', {
-                kodeBarangId: kodeBarangId,
-                kodeBarang: kodeBarang,
-                namaBarang: namaBarang,
-                selectedOption: selectedOption[0],
-                dataAttributes: {
-                    kode: selectedOption.data('kode'),
-                    nama: selectedOption.data('nama'),
-                    harga: selectedOption.data('harga')
-                }
-            });
 
             if (!kodeBarangId || !kodeBarang || !namaBarang || harga === undefined || harga === null || !qty) {
                 alert('Mohon lengkapi data barang!');
                 return;
             }
 
-            // Calculate total
-            const subtotal = harga * qty;
+            // Total pakai qty terkonversi ke satuan kecil × harga kecil
+            const qtyKecil = qty * factor;
+            const subtotal = harga * qtyKecil;
             const diskonAmount = (subtotal * diskon) / 100;
             const total = subtotal - diskonAmount;
 
             const newItem = {
                 kodeBarang,
+                kodeBarangId,
                 namaBarang,
                 keterangan,
-                harga: harga,
-                qty,
+                harga: harga, // per satuan kecil
+                qty, // qty sesuai satuan yang dipilih (besar jika ada)
+                qtyKecil,
+                unitFactor: factor,
+                satuanKecil,
                 satuan,
                 satuanBesar,
                 diskon,
@@ -1124,12 +1216,15 @@
                         <td>${item.namaBarang}</td>
                         <td>${item.keterangan || '-'}</td>
                         <td class="text-right">${formatCurrency(item.harga)}</td>
-                        <td>${item.qty} ${item.satuan || ''}</td>
-                        <td>${item.satuanBesar || ''}</td>
+                        <td>${item.qty} ${item.satuanBesar || item.satuan || item.satuanKecil || ''}${item.satuanBesar && item.qtyKecil ? ` <small class="text-muted">(= ${item.qtyKecil} ${item.satuanKecil || ''})</small>` : ''}</td>
+                        <td>${item.satuanBesar || '-'}</td>
                         <td class="text-right">${formatCurrency(item.total)}</td>
                         <td class="text-right">${formatCurrency(item.ongkosKuli || 0)}</td>
                         <td class="text-right">${item.diskon || 0}%</td>
                         <td>
+                            <button type="button" class="btn btn-sm btn-primary edit-item" data-index="${index}">
+                                <i class="fas fa-edit"></i>
+                            </button>
                             <button type="button" class="btn btn-sm btn-danger remove-item" data-index="${index}">
                                 <i class="fas fa-trash"></i>
                             </button>
@@ -1146,8 +1241,133 @@
                 calculateTotals();
             });
 
+            // Edit item handling
+            $('.edit-item').click(function() {
+                openEditItemModal($(this).data('index'));
+            });
+
             $('#addItemModal').modal('hide');
         }
+
+        // Populate & open the edit modal for a line item
+        function openEditItemModal(index) {
+            const item = items[index];
+            if (!item) return;
+
+            $('#edit_item_index').val(index);
+            $('#edit_item_nama').val(item.namaBarang || '');
+            $('#edit_item_qty').val(item.qty);
+            $('#edit_item_harga').val(item.harga);
+            $('#edit_item_satuan_kecil').val(item.satuanKecil || item.satuan || 'LBR');
+            $('#edit_item_diskon').val(item.diskon || 0);
+            $('#edit_item_ongkos_kuli').val(item.ongkosKuli || 0);
+            $('#edit_item_keterangan').val(item.keterangan || '');
+
+            const besarSelect = $('#edit_item_satuan_besar');
+            besarSelect.empty();
+            besarSelect.append('<option value="">- (pakai satuan kecil)</option>');
+
+            const unitDasar = item.satuanKecil || item.satuan || 'LBR';
+            const seedFactors = { [unitDasar]: 1 };
+            if (item.satuanBesar && item.unitFactor) {
+                seedFactors[item.satuanBesar] = item.unitFactor;
+            }
+            $('#editItemModal').data('unit-factors', seedFactors);
+
+            if (item.kodeBarangId) {
+                $.ajax({
+                    url: `{{ route('sales-order.available-units', '') }}/${item.kodeBarangId}`,
+                    method: 'GET',
+                    success: function(units) {
+                        const unitList = Array.isArray(units) ? units : (units.units || []);
+                        const factors = Array.isArray(units) ? {} : (units.factors || {});
+                        $('#editItemModal').data('unit-factors', Object.assign({ [unitDasar]: 1 }, factors));
+                        unitList.forEach(function(u) {
+                            if (u !== unitDasar) {
+                                const factor = factors[u] || 1;
+                                besarSelect.append(`<option value="${u}">${u} (1 = ${factor} ${unitDasar})</option>`);
+                            }
+                        });
+                        besarSelect.val(item.satuanBesar || '');
+                        updateEditItemQtyHint();
+                    },
+                    error: function() {
+                        if (item.satuanBesar) {
+                            besarSelect.append(`<option value="${item.satuanBesar}">${item.satuanBesar}</option>`);
+                        }
+                        besarSelect.val(item.satuanBesar || '');
+                        updateEditItemQtyHint();
+                    }
+                });
+            } else if (item.satuanBesar) {
+                besarSelect.append(`<option value="${item.satuanBesar}">${item.satuanBesar}</option>`);
+                besarSelect.val(item.satuanBesar);
+            }
+
+            $('#editItemModal').modal('show');
+            updateEditItemQtyHint();
+        }
+
+        function updateEditItemQtyHint() {
+            const qty = parseFloat($('#edit_item_qty').val()) || 0;
+            const satuanKecil = $('#edit_item_satuan_kecil').val() || 'LBR';
+            const satuanBesar = $('#edit_item_satuan_besar').val() || '';
+            const factors = $('#editItemModal').data('unit-factors') || {};
+            const factor = satuanBesar ? (parseFloat(factors[satuanBesar]) || 1) : 1;
+            const hint = $('#edit_item_qty_hint');
+            if (satuanBesar && qty > 0 && factor > 1) {
+                hint.text(`${qty} ${satuanBesar} = ${qty * factor} ${satuanKecil} (harga × ${satuanKecil})`).show();
+            } else {
+                hint.hide().text('');
+            }
+        }
+
+        $(document).on('input change', '#edit_item_qty, #edit_item_satuan_besar', updateEditItemQtyHint);
+
+        // Save edited item
+        $('#saveEditItemBtn').click(function() {
+            const index = parseInt($('#edit_item_index').val(), 10);
+            const item = items[index];
+            if (!item) return;
+
+            const qty = parseFloat($('#edit_item_qty').val()) || 0;
+            const harga = parseFloat($('#edit_item_harga').val()) || 0;
+            const diskon = parseFloat($('#edit_item_diskon').val()) || 0;
+            const ongkosKuli = parseFloat($('#edit_item_ongkos_kuli').val()) || 0;
+            const keterangan = $('#edit_item_keterangan').val();
+            const satuanKecil = item.satuanKecil || item.satuan || 'LBR';
+            const satuanBesar = $('#edit_item_satuan_besar').val();
+            const factors = $('#editItemModal').data('unit-factors') || {};
+            const factor = satuanBesar ? (parseFloat(factors[satuanBesar]) || item.unitFactor || 1) : 1;
+
+            if (!qty) {
+                alert('Mohon lengkapi qty dan harga!');
+                return;
+            }
+
+            const qtyKecil = qty * factor;
+            const subtotal = harga * qtyKecil;
+            const total = subtotal - (subtotal * diskon) / 100;
+
+            items[index] = Object.assign({}, item, {
+                namaBarang: $('#edit_item_nama').val() || item.namaBarang,
+                qty,
+                qtyKecil,
+                unitFactor: factor,
+                harga,
+                diskon,
+                ongkosKuli,
+                keterangan,
+                satuanKecil,
+                satuanBesar,
+                satuan: satuanBesar ? satuanBesar : satuanKecil,
+                total
+            });
+
+            $('#editItemModal').modal('hide');
+            renderItems();
+            calculateTotals();
+        });
 
         // Calculate all totals
         function calculateTotals() {
@@ -1206,6 +1426,7 @@
         }
 
         const transactionData = {
+            _token: $('meta[name="csrf-token"]').attr('content') || $('input[name="_token"]').val(),
             tanggal: $('#tanggal').val(),
             kode_customer: $('#kode_customer').val(),
             sales_order_id: $('#sales_order_id').val() || null,
@@ -1231,6 +1452,9 @@
         $.ajax({
             url: "{{ route('transaksi.store') }}",
             method: "POST",
+            headers: {
+                'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+            },
             data: transactionData,
             success: function(response) {
                 hideLoading();

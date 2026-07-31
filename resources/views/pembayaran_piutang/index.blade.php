@@ -4,9 +4,11 @@
 <div class="card">
 	<div class="card-header d-flex justify-content-between align-items-center">
 		<span>Daftar Pembayaran Piutang</span>
+		@can('create pembayaran piutang')
 		<a href="{{ route('pembayaran-piutang.create') }}" class="btn btn-sm btn-primary">
 			<i class="fas fa-circle-plus mr-1"></i> Tambah Pembayaran
 		</a>
+		@endcan
 	</div>
 	<div class="card-body">
 		@if(isset($summary))
@@ -40,6 +42,12 @@
 							<td>{{ $p->status }}</td>
 							<td>
 								<a class="btn btn-sm btn-secondary" href="{{ route('pembayaran-piutang.show', $p->id) }}">Detail</a>
+								@if($p->status !== 'cancelled')
+									@can('edit pembayaran piutang')
+									<a class="btn btn-sm btn-warning" href="{{ route('pembayaran-piutang.edit', $p->id) }}">Edit</a>
+									<button type="button" class="btn btn-sm btn-danger btn-cancel-pembayaran" data-id="{{ $p->id }}" data-no="{{ $p->no_pembayaran }}">Batal</button>
+									@endcan
+								@endif
 							</td>
 						</tr>
 					@empty
@@ -56,4 +64,29 @@
 </div>
 @endsection
 
+@section('scripts')
+<script>
+document.querySelectorAll('.btn-cancel-pembayaran').forEach(btn => {
+	btn.addEventListener('click', function() {
+		const id = this.dataset.id;
+		const no = this.dataset.no;
+		if (!confirm('Batalkan pembayaran ' + no + '? Piutang faktur akan dikembalikan.')) return;
+		fetch(`{{ url('pembayaran-piutang') }}/${id}/cancel`, {
+			method: 'POST',
+			headers: {
+				'X-CSRF-TOKEN': '{{ csrf_token() }}',
+				'Accept': 'application/json',
+				'Content-Type': 'application/json'
+			}
+		})
+		.then(r => r.json())
+		.then(res => {
+			alert(res.message || (res.success ? 'Berhasil' : 'Gagal'));
+			if (res.success) location.reload();
+		})
+		.catch(() => alert('Gagal membatalkan pembayaran'));
+	});
+});
+</script>
+@endsection
 

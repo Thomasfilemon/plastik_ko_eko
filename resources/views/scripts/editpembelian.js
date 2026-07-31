@@ -83,11 +83,13 @@ $(document).ready(function () {
                     if (data.length > 0) {
                         data.forEach((item) => {
                             dropdown += `<a class="dropdown-item kode-barang-item" 
+                                            data-id="${item.id}"
                                             data-kode="${item.kode_barang}" 
-                                            data-name="${item.attribute}"
-                                            data-length="${item.length}"
-                                            data-cost="${item.cost}">
-                                        ${item.kode_barang} - ${item.attribute} (${item.length} m)
+                                            data-name="${item.name || item.attribute}"
+                                            data-unit="${item.unit_dasar || 'LBR'}"
+                                            data-length="${item.length || 0}"
+                                            data-cost="${item.cost || 0}">
+                                        ${item.kode_barang} - ${item.name || item.attribute}
                                         </a>`;
                         });
                     } else {
@@ -108,8 +110,10 @@ $(document).ready(function () {
 
     // Select Kode Barang
    $(document).on("click", ".kode-barang-item", function () {
+        const kodeBarangId = $(this).data("id");
         const kodeBarang = $(this).data("kode");
         const namaBarang = $(this).data("name");
+        const unitDasar = $(this).data("unit") || "LBR";
         const length = $(this).data("length");
         const cost = $(this).data("cost");
 
@@ -117,6 +121,28 @@ $(document).ready(function () {
         $("#nama_barang").val(namaBarang);
         $("#panjang").val(length);
         $("#harga").val(cost);
+        $("#kode_barang").data("kode-barang-id", kodeBarangId);
+        $("#satuanKecil").html(`<option value="${unitDasar}">${unitDasar}</option>`).val(unitDasar);
+
+        if (kodeBarangId && window.availableUnitsUrl) {
+            $.ajax({
+                url: `${window.availableUnitsUrl}/${kodeBarangId}`,
+                method: "GET",
+                success: function (units) {
+                    const besar = $("#satuanBesar");
+                    besar.empty().append('<option value="">- (pakai satuan kecil)</option>');
+                    const unitList = Array.isArray(units) ? units : (units.units || []);
+                    const factors = Array.isArray(units) ? {} : (units.factors || {});
+                    $("#kode_barang").data("unit-factors", Object.assign({ [unitDasar]: 1 }, factors));
+                    unitList.forEach((u) => {
+                        if (u !== unitDasar) {
+                            const factor = factors[u] || 1;
+                            besar.append(`<option value="${u}">${u} (1 = ${factor} ${unitDasar})</option>`);
+                        }
+                    });
+                }
+            });
+        }
         
         // Get panel name with AJAX request
         $.ajax({
@@ -161,41 +187,52 @@ $(document).ready(function () {
     $("#harga, #quantity, #panjang, #diskon").on("input", function () {
         updateItemPreview();
     });
+    $("#satuanKecil, #satuanBesar").on("change", function () {
+        updateItemPreview();
+    });
+
+    function getEditPembelianFactor(satuanBesar) {
+        if (!satuanBesar) return 1;
+        const factors = $("#kode_barang").data("unit-factors") || {};
+        const factor = parseFloat(factors[satuanBesar]);
+        return factor > 0 ? factor : 1;
+    }
 
     function updateItemPreview() {
         const kodeBarang = $("#kode_barang").val() || "-";
         const keterangan = $("#keterangan").val() || "-";
-        const harga = parseInt($("#harga").val()) || 0;
-        const quantity = parseInt($("#quantity").val()) || 0;
+        const harga = parseFloat($("#harga").val()) || 0;
+        const quantity = parseFloat($("#quantity").val()) || 0;
         const panjang = parseFloat($("#panjang").val()) || 0;
         const satuanKecil = $("#satuanKecil").val();
         const satuanBesar = $("#satuanBesar").val();
-        const diskon = parseInt($("#diskon").val()) || 0;
+        const diskon = parseFloat($("#diskon").val()) || 0;
+        const factor = getEditPembelianFactor(satuanBesar);
+        const qtyKecil = quantity * factor;
 
-        // Calculate values
-        const total = harga * quantity;
+        const total = harga * qtyKecil;
         const diskonAmount = (total * diskon) / 100;
         const subTotal = total - diskonAmount;
 
-        // Update preview
+        const hint = $("#qtyConversionHint");
+        if (satuanBesar && quantity > 0 && factor > 1) {
+            hint.text(`${quantity} ${satuanBesar} = ${qtyKecil} ${satuanKecil || "satuan kecil"} (harga × ${satuanKecil || "kecil"})`).show();
+        } else {
+            hint.hide().text("");
+        }
+
         const tbody = $("#itemPreview");
         tbody.empty();
-        $('#satuanKecil, #satuanBesar').on('change', function() {
-            updateItemPreview();
-        });
-
         tbody.append(`
             <tr>
                 <td>${kodeBarang}</td>
                 <td>${keterangan}</td>
                 <td class="text-right">${formatCurrency(harga)}</td>
-                <td>${quantity}</td>
-                <td>${
-                    panjang > 0 ? panjang + " m" : "-"
-                }</td>
+                <td>${quantity}${satuanBesar ? ` ${satuanBesar} (=${qtyKecil} ${satuanKecil||""})` : ""}</td>
+                <td>${panjang > 0 ? panjang + " m" : "-"}</td>
                 <td class="text-right">${formatCurrency(total)}</td>
-                <td>${satuanKecil}</td>
-                <td>${satuanBesar}</td>
+                <td>${satuanKecil || "-"}</td>
+                <td>${satuanBesar || "-"}</td>
                 <td>${diskon}%</td>
                 <td class="text-right">${formatCurrency(subTotal)}</td>
             </tr>
@@ -207,12 +244,14 @@ $(document).ready(function () {
         const kodeBarang = $("#kode_barang").val();
         const namaBarang = $("#nama_barang").val();
         const keterangan = $("#keterangan").val();
-        const harga = parseInt($("#harga").val()) || 0;
-        const qty = parseInt($("#quantity").val()) || 0;
+        const harga = parseFloat($("#harga").val()) || 0;
+        const qty = parseFloat($("#quantity").val()) || 0;
         const satuanKecil = $("#satuanKecil").val();
         const satuanBesar = $("#satuanBesar").val();
         const panjang = parseFloat($("#panjang").val()) || 0;
-        const diskon = parseInt($("#diskon").val()) || 0;
+        const diskon = parseFloat($("#diskon").val()) || 0;
+        const factor = getEditPembelianFactor(satuanBesar);
+        const qtyKecil = qty * factor;
 
         if (!kodeBarang || !namaBarang || !harga || !qty) {
             alert("Mohon lengkapi data barang!");
@@ -224,9 +263,8 @@ $(document).ready(function () {
             url: window.kodeBarangSearchUrl,
             method: "GET",
             data: { keyword: kodeBarang },
-            async: false, // Make this synchronous to ensure check completes before continuing
+            async: false,
             success: function (data) {
-                // If no matching kode barang found
                 if (
                     data.length === 0 ||
                     !data.some((item) => item.kode_barang === kodeBarang)
@@ -237,28 +275,33 @@ $(document).ready(function () {
                     return false;
                 }
 
-                // If valid, add item
-                const total = harga * qty;
+                const subtotal = harga * qtyKecil;
+                const total = subtotal - (subtotal * diskon) / 100;
+                const satuan = satuanBesar ? satuanBesar : (satuanKecil || "LBR");
 
                 const newItem = {
                     kodeBarang,
+                    kodeBarangId: $("#kode_barang").data("kode-barang-id") || null,
                     namaBarang,
                     keterangan,
                     harga,
                     qty,
-                    satuanKecil,
-                    satuanBesar,
+                    qtyKecil,
+                    unitFactor: factor,
+                    satuanKecil: satuanKecil || "LBR",
+                    satuanBesar: satuanBesar || "",
+                    satuan,
                     panjang,
                     diskon,
                     total,
                 };
-                console.log(newItem)
                 items.push(newItem);
                 renderItems();
                 calculateTotals();
 
-                // Reset form and close modal
                 $("#addItemForm")[0].reset();
+                $("#kode_barang").removeData("kode-barang-id");
+                $("#qtyConversionHint").hide().text("");
                 $("#itemPreview").empty();
                 $("#addItemModal").modal("hide");
             },
@@ -279,19 +322,27 @@ $(document).ready(function () {
         tbody.empty();
 
         items.forEach((item, index) => {
+            const satuanKecil = item.satuanKecil || item.satuan || "LBR";
+            const satuanBesar = item.satuanBesar || "-";
+            const qtyLabel = item.satuanBesar && item.qtyKecil
+                ? `${item.qty} ${item.satuanBesar} <small class="text-muted">(= ${item.qtyKecil} ${satuanKecil})</small>`
+                : `${item.qty}`;
             tbody.append(`
                 <tr>
                     <td>${item.kodeBarang}</td>
                     <td>${item.namaBarang}</td>
                     <td>${item.keterangan || "-"}</td>
                     <td class="text-right">${formatCurrency(item.harga)}</td>
-                    <td class="text-center">${item.qty}</td>
-                    <td class="text-center">${item.satuanKecil}</td>
-                    <td class="text-center">${item.satuanBesar}</td>
+                    <td class="text-center">${qtyLabel}</td>
+                    <td class="text-center">${satuanKecil}</td>
+                    <td class="text-center">${satuanBesar}</td>
                     <td class="text-right">${formatCurrency(item.total)}</td>
-                    <td class="text-right">${item.diskon}%</td>
+                    <td class="text-right">${item.diskon || 0}%</td>
                     <td>
-                        <button type="button" class="btn btn-sm btn-danger remove-item" data-index="${index}">
+                        <button type="button" class="btn btn-sm btn-primary edit-item" data-index="${index}" title="Edit barang">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-danger remove-item" data-index="${index}" title="Hapus barang">
                             <i class="fas fa-trash"></i>
                         </button>
                     </td>
@@ -306,15 +357,142 @@ $(document).ready(function () {
             renderItems();
             calculateTotals();
         });
+
+        // Edit item handling
+        $(".edit-item").click(function () {
+            openEditItemModal($(this).data("index"));
+        });
     }
+
+    function openEditItemModal(index) {
+        const item = items[index];
+        if (!item) return;
+
+        $("#edit_item_index").val(index);
+        $("#edit_item_nama").val(item.namaBarang || "");
+        $("#edit_item_qty").val(item.qty);
+        $("#edit_item_harga").val(item.harga);
+        $("#edit_item_satuan_kecil").val(item.satuanKecil || item.satuan || "LBR");
+        $("#edit_item_diskon").val(item.diskon || 0);
+        $("#edit_item_panjang").val(item.panjang || 0);
+        $("#edit_item_keterangan").val(item.keterangan || "");
+
+        const besarSelect = $("#edit_item_satuan_besar");
+        besarSelect.empty();
+        besarSelect.append('<option value="">- (pakai satuan kecil)</option>');
+
+        const unitDasar = item.satuanKecil || item.satuan || "LBR";
+        const seedFactors = { [unitDasar]: 1 };
+        if (item.satuanBesar && item.unitFactor) {
+            seedFactors[item.satuanBesar] = item.unitFactor;
+        }
+        $("#editItemModal").data("unit-factors", seedFactors);
+
+        if (item.kodeBarangId && window.availableUnitsUrl) {
+            $.ajax({
+                url: `${window.availableUnitsUrl}/${item.kodeBarangId}`,
+                method: "GET",
+                success: function (units) {
+                    if (Array.isArray(units) || (units && units.units)) {
+                        const unitList = Array.isArray(units) ? units : (units.units || []);
+                        const factors = Array.isArray(units) ? {} : (units.factors || {});
+                        $("#editItemModal").data("unit-factors", Object.assign({ [unitDasar]: 1 }, factors));
+                        unitList.forEach((u) => {
+                            if (u !== unitDasar) {
+                                const factor = factors[u] || 1;
+                                besarSelect.append(`<option value="${u}">${u} (1 = ${factor} ${unitDasar})</option>`);
+                            }
+                        });
+                    }
+                    besarSelect.val(item.satuanBesar || "");
+                    updateEditItemQtyHint();
+                },
+                error: function () {
+                    if (item.satuanBesar) {
+                        besarSelect.append(
+                            `<option value="${item.satuanBesar}">${item.satuanBesar}</option>`
+                        );
+                    }
+                    besarSelect.val(item.satuanBesar || "");
+                    updateEditItemQtyHint();
+                },
+            });
+        } else if (item.satuanBesar) {
+            besarSelect.append(
+                `<option value="${item.satuanBesar}">${item.satuanBesar}</option>`
+            );
+            besarSelect.val(item.satuanBesar);
+        }
+
+        $("#editItemModal").modal("show");
+        updateEditItemQtyHint();
+    }
+
+    $("#saveEditItemBtn").click(function () {
+        const index = parseInt($("#edit_item_index").val(), 10);
+        const item = items[index];
+        if (!item) return;
+
+        const qty = parseFloat($("#edit_item_qty").val()) || 0;
+        const harga = parseFloat($("#edit_item_harga").val()) || 0;
+        const diskon = parseFloat($("#edit_item_diskon").val()) || 0;
+        const panjang = parseFloat($("#edit_item_panjang").val()) || 0;
+        const keterangan = $("#edit_item_keterangan").val();
+        const namaBarang = $("#edit_item_nama").val() || item.namaBarang;
+        const satuanKecil = item.satuanKecil || item.satuan || "LBR";
+        const satuanBesar = $("#edit_item_satuan_besar").val();
+        const factors = $("#editItemModal").data("unit-factors") || {};
+        const factor = satuanBesar ? (parseFloat(factors[satuanBesar]) || item.unitFactor || 1) : 1;
+        const qtyKecil = qty * factor;
+
+        if (!qty) {
+            alert("Mohon lengkapi qty dan harga!");
+            return;
+        }
+
+        const subtotal = harga * qtyKecil;
+        const total = subtotal - (subtotal * diskon) / 100;
+
+        items[index] = Object.assign({}, item, {
+            namaBarang,
+            qty,
+            qtyKecil,
+            unitFactor: factor,
+            harga,
+            diskon,
+            panjang,
+            keterangan,
+            satuanKecil,
+            satuanBesar,
+            satuan: satuanBesar ? satuanBesar : satuanKecil,
+            total,
+        });
+
+        $("#editItemModal").modal("hide");
+        renderItems();
+        calculateTotals();
+    });
+
+    function updateEditItemQtyHint() {
+        const qty = parseFloat($("#edit_item_qty").val()) || 0;
+        const satuanKecil = $("#edit_item_satuan_kecil").val() || "LBR";
+        const satuanBesar = $("#edit_item_satuan_besar").val() || "";
+        const factors = $("#editItemModal").data("unit-factors") || {};
+        const factor = satuanBesar ? (parseFloat(factors[satuanBesar]) || 1) : 1;
+        const hint = $("#edit_item_qty_hint");
+        if (satuanBesar && qty > 0 && factor > 1) {
+            hint.text(`${qty} ${satuanBesar} = ${qty * factor} ${satuanKecil}`).show();
+        } else {
+            hint.hide().text("");
+        }
+    }
+
+    $(document).on("input change", "#edit_item_qty, #edit_item_satuan_besar", updateEditItemQtyHint);
 
     // Calculate all totals
     function calculateTotals() {
-        // Calculate subtotal
-        const subtotal = items.reduce((sum, item) => {
-            const itemDiskon = (item.total * item.diskon) / 100;
-            return sum + (item.total - itemDiskon);
-        }, 0);
+        // Calculate subtotal (item.total already net of line discount)
+        const subtotal = items.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0);
 
         $("#total").val(formatCurrency(subtotal));
 
@@ -358,6 +536,7 @@ $(document).ready(function () {
             }
 
             const transactionData = {
+                _token: window.csrfToken || $('meta[name="csrf-token"]').attr("content"),
                 nota: $("#no_nota").val(),
                 no_surat_jalan: $("#no_surat_jalan").val(),    
                 tanggal: $("#tanggal").val(),
@@ -381,13 +560,18 @@ $(document).ready(function () {
                 edit_reason: $("#edit_reason").val()  // <-- Added this line
             };
 
+            if (!transactionData.edit_reason || !String(transactionData.edit_reason).trim()) {
+                alert("Alasan edit harus diisi!");
+                return;
+            }
+
             // Send data to backend - FIXED to use updateTransactionUrl
             $.ajax({
                 url: window.updateTransactionUrl,
                 method: "POST", // Note: Some Laravel apps might require PATCH or PUT for updates
                 data: transactionData,
                 headers: {
-                    "X-CSRF-TOKEN": window.csrfToken,
+                    "X-CSRF-TOKEN": window.csrfToken || $('meta[name="csrf-token"]').attr("content"),
                 },
                 success: function (response) {
                     alert("Transaksi berhasil diperbarui!");

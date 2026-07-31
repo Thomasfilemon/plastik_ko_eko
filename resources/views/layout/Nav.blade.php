@@ -3,11 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    @if(config('app.force_https'))
     <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
+    @endif
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>Atap Management System</title>
     <!-- jQuery -->
     <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script>
+        // Attach CSRF token to all jQuery AJAX requests
+        $.ajaxSetup({
+            headers: {
+                'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+            }
+        });
+    </script>
     <!-- Popper.js -->
     <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
 
@@ -670,6 +680,7 @@
                                 </div>
                             </li>
                             <!-- Pembayaran Piutang -->
+                            @can('view pembayaran piutang')
                             <li class='nav-item'>
                                 <a class="nav-link" data-toggle="collapse" href="#pembayaranPiutang" role="button" aria-expanded="false" aria-controls="pembayaranPiutang">
                                     <i class="fas fa-money-check-alt"></i> Pembayaran Piutang
@@ -677,9 +688,11 @@
                                 </a>
                                 <div class="collapse bg-dark border-0" id="pembayaranPiutang">
                                     <ul class="nav flex-column ml-3">
+                                        @can('create pembayaran piutang')
                                         <li class="nav-item">
                                             <a class="nav-link" href="{{ route('pembayaran-piutang.create') }}"><i class="fas fa-circle-plus"></i> Tambah Pembayaran</a>
                                         </li>
+                                        @endcan
                                         <li class="nav-item">
                                             <a class="nav-link" href="{{ route('pembayaran-piutang.index') }}"><i class="fas fa-list"></i> Daftar Pembayaran</a>
                                         </li>
@@ -689,7 +702,9 @@
                                     </ul>
                                 </div>
                             </li>
+                            @endcan
                             <!-- Pembayaran Utang Supplier -->
+                            @can('view pembayaran utang supplier')
                             <li class='nav-item'>
                                 <a class="nav-link" data-toggle="collapse" href="#pembayaranUtangSupplier" role="button" aria-expanded="false" aria-controls="pembayaranUtangSupplier">
                                     <i class="fas fa-money-bill-wave"></i> Pembayaran Utang Supplier
@@ -697,15 +712,18 @@
                                 </a>
                                 <div class="collapse bg-dark border-0" id="pembayaranUtangSupplier">
                                     <ul class="nav flex-column ml-3">
+                                        @can('create pembayaran utang supplier')
                                         <li class="nav-item">
                                             <a class="nav-link" href="{{ route('pembayaran-utang-supplier.create') }}"><i class="fas fa-circle-plus"></i> Tambah Pembayaran</a>
                                         </li>
+                                        @endcan
                                         <li class="nav-item">
                                             <a class="nav-link" href="{{ route('pembayaran-utang-supplier.index') }}"><i class="fas fa-list"></i> Daftar Pembayaran</a>
                                         </li>
                                     </ul>
                                 </div>
                             </li>
+                            @endcan
                         </ul>
                     </div>
                 </li>

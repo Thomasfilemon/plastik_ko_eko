@@ -11,6 +11,8 @@ use Illuminate\Auth\Events\Validated;
 use Illuminate\Http\Request;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use App\Models\UnitConversion;
 
 use Exception;
 
@@ -367,13 +369,15 @@ class PanelController extends Controller
         $name = $validated['name'];
         // $length = $validated['length'];
         $group_id = $validated['group_id'];
-        $cost = 0; // Set default cost, harga beli hanya diinput dari pembelian
         $quantity = $validated['quantity'];
         $status = $validated['status'];
-        // dd($validated);
-        Panel::where('group_id', $group_id)->delete();
 
         $kode = KodeBarang::where('kode_barang', $group_id)->first();
+        // Preserve the existing purchase cost instead of resetting it to 0
+        $cost = $kode->cost ?? 0;
+
+        Panel::where('group_id', $group_id)->delete();
+
         $kode->name = $name;
         // $kode->length = $length;
         $kode->cost = $cost;
@@ -391,10 +395,36 @@ class PanelController extends Controller
 
     public function deleteInventory(Request $request)
     {
-        Panel::where('group_id', $request->id)->delete();
+        $groupId = $request->id; // kode_barang string used as panels.group_id
 
-        return redirect()->route('master.barang')
-            ->with('success', "Item deleted successfully");
+        try {
+            DB::beginTransaction();
+
+            // Remove physical panel rows for this item
+            Panel::where('group_id', $groupId)->delete();
+
+            // Remove aggregated stock record
+            Stock::where('kode_barang', $groupId)->delete();
+
+            // Remove the master item itself (this is what was missing before)
+            $kode = KodeBarang::where('kode_barang', $groupId)->first();
+            if ($kode) {
+                // Remove unit conversions tied to this master item
+                UnitConversion::where('kode_barang_id', $kode->id)->delete();
+                $kode->delete();
+            }
+
+            DB::commit();
+
+            return redirect()->route('master.barang')
+                ->with('success', 'Barang berhasil dihapus.');
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error deleting barang:', ['kode_barang' => $groupId, 'exception' => $e->getMessage()]);
+
+            return redirect()->route('master.barang')
+                ->with('error', 'Barang tidak dapat dihapus karena sudah digunakan pada transaksi. Silakan nonaktifkan barang sebagai gantinya.');
+        }
     }
 
     /**

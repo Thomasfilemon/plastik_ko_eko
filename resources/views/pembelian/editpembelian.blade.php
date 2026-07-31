@@ -211,13 +211,14 @@
                         
                         <div class="col-md-6">
                             <div class="form-group">
-                                <label for="harga">Harga Beli</label>
+                                <label for="harga">Harga Beli <small class="text-muted">(per satuan kecil)</small></label>
                                 <input type="number" class="form-control" id="harga" name="harga" required>
                             </div>
                             
                             <div class="form-group">
                                 <label for="quantity">Quantity</label>
-                                <input type="number" class="form-control" id="quantity" name="quantity" value="1" min="1" required>
+                                <input type="number" class="form-control" id="quantity" name="quantity" value="1" min="0.01" step="0.01" required>
+                                <small class="form-text text-muted" id="qtyConversionHint" style="display:none;"></small>
                             </div>
 
                             
@@ -274,6 +275,68 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-dismiss="modal">Tutup</button>
                 <button type="button" class="btn btn-primary" id="saveItemBtn">Tambahkan</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Item Modal -->
+<div class="modal fade" id="editItemModal" tabindex="-1" role="dialog" aria-labelledby="editItemModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editItemModalLabel">Edit Barang</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit_item_index">
+                <div class="form-group">
+                    <label>Nama Barang</label>
+                    <input type="text" class="form-control" id="edit_item_nama">
+                </div>
+                <div class="row">
+                    <div class="col-md-6 form-group">
+                        <label>Qty</label>
+                        <input type="number" class="form-control" id="edit_item_qty" step="0.01" min="0.01">
+                        <small class="form-text text-muted" id="edit_item_qty_hint" style="display:none;"></small>
+                    </div>
+                    <div class="col-md-6 form-group">
+                        <label>Harga Beli <small class="text-muted">(per satuan kecil)</small></label>
+                        <input type="number" class="form-control" id="edit_item_harga" step="0.01" min="0">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 form-group">
+                        <label>Satuan Kecil</label>
+                        <input type="text" class="form-control" id="edit_item_satuan_kecil" readonly>
+                    </div>
+                    <div class="col-md-6 form-group">
+                        <label>Satuan Besar</label>
+                        <select class="form-control" id="edit_item_satuan_besar"></select>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 form-group">
+                        <label>Diskon (%)</label>
+                        <input type="number" class="form-control" id="edit_item_diskon" min="0" max="100">
+                    </div>
+                    <div class="col-md-6 form-group">
+                        <label>Panjang</label>
+                        <input type="number" class="form-control" id="edit_item_panjang" step="0.01">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Keterangan</label>
+                    <input type="text" class="form-control" id="edit_item_keterangan">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="saveEditItemBtn">
+                    <i class="fas fa-save mr-1"></i> Simpan Perubahan
+                </button>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Tutup</button>
             </div>
         </div>
     </div>
@@ -337,18 +400,31 @@
     // Add kode barang search routes
     window.kodeBarangSearchUrl = "{{ route('kodeBarang.search') }}";
     window.getPanelInfoUrl = "{{ route('panel.by.kodeBarang') }}";
+    window.availableUnitsUrl = "{{ url('sales-order/available-units') }}";
     
-    // Initial items data
+    // Initial items: qty in satuan input (besar if any), harga always per satuan kecil
     const initialItems = {!! json_encode($purchase->items->map(function($item) {
+        $kode = $item->kodeBarang;
+        $hasBesar = !empty($item->satuan_besar) && !empty($item->qty_besar) && (float)$item->qty_besar > 0;
+        $factor = $hasBesar ? ((float)$item->qty / (float)$item->qty_besar) : 1.0;
+        $qtyDisplay = $hasBesar ? (float)$item->qty_besar : (float)$item->qty;
+        $satuanKecil = $item->satuan ?: (optional($kode)->unit_dasar ?? 'LBR');
+
         return [
             'kodeBarang' => $item->kode_barang,
+            'kodeBarangId' => optional($kode)->id,
             'namaBarang' => $item->nama_barang,
             'keterangan' => $item->keterangan,
-            'harga' => (int)$item->harga,
-            'qty' => (int)$item->qty,
-            'panjang' => 0, // Assuming this isn't stored, adjust if it is
-            'diskon' => (int)$item->diskon,
-            'total' => (int)$item->total
+            'harga' => (float)$item->harga,
+            'qty' => $qtyDisplay,
+            'qtyKecil' => (float)$item->qty,
+            'unitFactor' => $factor,
+            'satuan' => $hasBesar ? $item->satuan_besar : $satuanKecil,
+            'satuanKecil' => $satuanKecil,
+            'satuanBesar' => $item->satuan_besar ?: '',
+            'panjang' => 0,
+            'diskon' => (float)$item->diskon,
+            'total' => (float)$item->total,
         ];
     })) !!};
 

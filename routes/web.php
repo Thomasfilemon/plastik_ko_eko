@@ -657,17 +657,24 @@ Route::middleware(['web', 'auth'])->group(function () {
     // PEMBAYARAN PIUTANG SECTION
     // ==============================
     
-    // Pembayaran Piutang routes - View and Create
+    // Pembayaran Piutang — list / laporan
     Route::group(['middleware' => ['permission:view pembayaran piutang'], 'prefix' => 'pembayaran-piutang'], function () {
         Route::get('/', [PembayaranPiutangController::class, 'index'])->name('pembayaran-piutang.index');
+        Route::get('/laporan', [PembayaranPiutangController::class, 'laporanPiutang'])->name('pembayaran-piutang.laporan');
+    });
+
+    // Pembayaran Piutang — create (must be before {pembayaran} wildcard)
+    Route::group(['middleware' => ['permission:create pembayaran piutang'], 'prefix' => 'pembayaran-piutang'], function () {
         Route::get('/create', [PembayaranPiutangController::class, 'create'])->name('pembayaran-piutang.create');
         Route::post('/store', [PembayaranPiutangController::class, 'store'])->name('pembayaran-piutang.store');
-        // Place static paths BEFORE wildcard to avoid conflicts
-        Route::get('/laporan', [PembayaranPiutangController::class, 'laporanPiutang'])->name('pembayaran-piutang.laporan');
+    });
+
+    // Pembayaran Piutang — detail
+    Route::group(['middleware' => ['permission:view pembayaran piutang'], 'prefix' => 'pembayaran-piutang'], function () {
         Route::get('/{pembayaran}', [PembayaranPiutangController::class, 'show'])->name('pembayaran-piutang.show');
     });
     
-    // Pembayaran Piutang routes - Edit and Manage
+    // Pembayaran Piutang — edit / cancel
     Route::group(['middleware' => ['permission:edit pembayaran piutang'], 'prefix' => 'pembayaran-piutang'], function () {
         Route::get('/{pembayaran}/edit', [PembayaranPiutangController::class, 'edit'])->name('pembayaran-piutang.edit');
         Route::put('/{pembayaran}', [PembayaranPiutangController::class, 'update'])->name('pembayaran-piutang.update');
@@ -680,22 +687,30 @@ Route::middleware(['web', 'auth'])->group(function () {
     // PEMBAYARAN UTANG SUPPLIER SECTION
     // ==============================
     
-    // Pembayaran Utang Supplier routes - View and Create
+    // Utang supplier — list
     Route::group(['middleware' => ['permission:view pembayaran utang supplier'], 'prefix' => 'pembayaran-utang-supplier'], function () {
         Route::get('/', [App\Http\Controllers\PembayaranUtangSupplierController::class, 'index'])->name('pembayaran-utang-supplier.index');
+    });
+
+    // Utang supplier — create (must be before wildcard)
+    Route::group(['middleware' => ['permission:create pembayaran utang supplier'], 'prefix' => 'pembayaran-utang-supplier'], function () {
         Route::get('/create', [App\Http\Controllers\PembayaranUtangSupplierController::class, 'create'])->name('pembayaran-utang-supplier.create');
         Route::post('/store', [App\Http\Controllers\PembayaranUtangSupplierController::class, 'store'])->name('pembayaran-utang-supplier.store');
+    });
+
+    // Utang supplier — detail
+    Route::group(['middleware' => ['permission:view pembayaran utang supplier'], 'prefix' => 'pembayaran-utang-supplier'], function () {
         Route::get('/{pembayaranUtangSupplier}', [App\Http\Controllers\PembayaranUtangSupplierController::class, 'show'])->name('pembayaran-utang-supplier.show');
     });
     
-    // Pembayaran Utang Supplier routes - Edit and Manage
+    // Utang supplier — edit
     Route::group(['middleware' => ['permission:edit pembayaran utang supplier'], 'prefix' => 'pembayaran-utang-supplier'], function () {
         Route::get('/{pembayaranUtangSupplier}/edit', [App\Http\Controllers\PembayaranUtangSupplierController::class, 'edit'])->name('pembayaran-utang-supplier.edit');
         Route::put('/{pembayaranUtangSupplier}', [App\Http\Controllers\PembayaranUtangSupplierController::class, 'update'])->name('pembayaran-utang-supplier.update');
         Route::delete('/{pembayaranUtangSupplier}', [App\Http\Controllers\PembayaranUtangSupplierController::class, 'destroy'])->name('pembayaran-utang-supplier.destroy');
     });
     
-    // Pembayaran Utang Supplier routes - Confirm/Cancel
+    // Utang supplier — confirm/cancel
     Route::group(['middleware' => ['permission:manage pembayaran utang supplier'], 'prefix' => 'pembayaran-utang-supplier'], function () {
         Route::post('/{pembayaranUtangSupplier}/confirm', [App\Http\Controllers\PembayaranUtangSupplierController::class, 'confirm'])->name('pembayaran-utang-supplier.confirm');
         Route::post('/{pembayaranUtangSupplier}/cancel', [App\Http\Controllers\PembayaranUtangSupplierController::class, 'cancel'])->name('pembayaran-utang-supplier.cancel');

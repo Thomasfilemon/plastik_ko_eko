@@ -4,6 +4,12 @@
 <div class="card">
 	<div class="card-header">Detail Pembayaran Piutang</div>
 	<div class="card-body">
+		@if(session('success'))
+			<div class="alert alert-success">{{ session('success') }}</div>
+		@endif
+		@if(session('error'))
+			<div class="alert alert-danger">{{ session('error') }}</div>
+		@endif
 		@if(isset($pembayaran))
 			<div class="mb-3">
 				<strong>No Pembayaran:</strong> {{ $pembayaran->no_pembayaran }}<br>
@@ -45,8 +51,38 @@
 		@endif
 
 		<a href="{{ route('pembayaran-piutang.index') }}" class="btn btn-secondary mt-2">Kembali</a>
+		@if(isset($pembayaran) && $pembayaran->status !== 'cancelled')
+			@can('edit pembayaran piutang')
+			<a href="{{ route('pembayaran-piutang.edit', $pembayaran->id) }}" class="btn btn-warning mt-2">Edit</a>
+			<button type="button" class="btn btn-danger mt-2 btn-cancel-pembayaran" data-id="{{ $pembayaran->id }}" data-no="{{ $pembayaran->no_pembayaran }}">Batalkan Pembayaran</button>
+			@endcan
+		@endif
 	</div>
 </div>
 @endsection
 
-
+@section('scripts')
+<script>
+document.querySelectorAll('.btn-cancel-pembayaran').forEach(btn => {
+	btn.addEventListener('click', function() {
+		const id = this.dataset.id;
+		const no = this.dataset.no;
+		if (!confirm('Batalkan pembayaran ' + no + '? Piutang faktur akan dikembalikan.')) return;
+		fetch(`{{ url('pembayaran-piutang') }}/${id}/cancel`, {
+			method: 'POST',
+			headers: {
+				'X-CSRF-TOKEN': '{{ csrf_token() }}',
+				'Accept': 'application/json',
+				'Content-Type': 'application/json'
+			}
+		})
+		.then(r => r.json())
+		.then(res => {
+			alert(res.message || (res.success ? 'Berhasil' : 'Gagal'));
+			if (res.success) location.href = '{{ route('pembayaran-piutang.index') }}';
+		})
+		.catch(() => alert('Gagal membatalkan pembayaran'));
+	});
+});
+</script>
+@endsection

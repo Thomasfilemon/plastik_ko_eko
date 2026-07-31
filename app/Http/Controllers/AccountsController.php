@@ -275,8 +275,8 @@ class AccountsController extends Controller
 
         // Coba login dengan Auth::attempt()
         if (Auth::attempt($credentials, $remember_me)) {
-            session()->put('auth_user_id', Auth::id()); // Simpan user ID manual
-            session()->save(); // Paksa Laravel menyimpan session
+            $request->session()->regenerate();
+            session()->put('auth_user_id', Auth::id());
             return redirect()->intended('/');
         }
 
@@ -284,8 +284,8 @@ class AccountsController extends Controller
         $user = User::where('email', $request->email)->first();
         if ($user && Hash::check($request->password, $user->password)) {
             Auth::login($user, $remember_me);
+            $request->session()->regenerate();
             session()->put('auth_user_id', Auth::id());
-            session()->save();
             return redirect()->intended('/');
         }
 

@@ -92,22 +92,40 @@ class PembayaranPiutangController extends Controller
         try {
             $customerId = $request->customer_id;
             $customer = Customer::find($customerId);
+            $excludePembayaranId = $request->exclude_pembayaran_id;
 
-            // Get unpaid invoices (belum dibayar atau sebagian)
+            // Amounts from this payment to "add back" into available sisa when editing
+            $amountsByTransaksi = collect();
+            if ($excludePembayaranId) {
+                $amountsByTransaksi = PembayaranDetail::where('pembayaran_id', $excludePembayaranId)
+                    ->get()
+                    ->keyBy('transaksi_id');
+            }
+
+            // Get unpaid invoices, plus invoices already in the payment being edited
             $invoices = Transaksi::where('kode_customer', $customer->kode_customer)
-                ->whereIn('status_piutang', ['belum_dibayar', 'sebagian'])
+                ->where(function ($q) use ($excludePembayaranId) {
+                    $q->whereIn('status_piutang', ['belum_dibayar', 'sebagian']);
+                    if ($excludePembayaranId) {
+                        $q->orWhereHas('pembayaranDetails', function ($d) use ($excludePembayaranId) {
+                            $d->where('pembayaran_id', $excludePembayaranId);
+                        });
+                    }
+                })
                 ->orderBy('tanggal', 'asc') // FIFO - oldest first
                 ->get()
-                ->map(function ($invoice) {
+                ->map(function ($invoice) use ($amountsByTransaksi) {
                     // Hitung total retur penjualan yang sudah approved untuk transaksi ini
                     $totalReturApproved = \App\Models\ReturPenjualan::where('transaksi_id', $invoice->id)
                         ->whereIn('status', ['approved', 'processed'])
                         ->sum('total_retur');
 
-                    // Sisa piutang setelah dikurangi retur
-                    // Formula: (grand_total - retur) - sudah_dibayar
+                    $dilunasiByThis = (float) optional($amountsByTransaksi->get($invoice->id))->jumlah_dilunasi;
+                    $sudahDibayarAdjusted = max(0, ($invoice->total_dibayar ?? 0) - $dilunasiByThis);
+
+                    // Sisa piutang setelah dikurangi retur, treating excluded payment as not applied
                     $tagihanSetelahRetur = $invoice->grand_total - $totalReturApproved;
-                    $sisaPiutangSetelahRetur = $tagihanSetelahRetur - $invoice->total_dibayar;
+                    $sisaPiutangSetelahRetur = $tagihanSetelahRetur - $sudahDibayarAdjusted;
                     
                     // Pastikan tidak negatif
                     if ($sisaPiutangSetelahRetur < 0) {
@@ -120,14 +138,15 @@ class PembayaranPiutangController extends Controller
                         'tanggal' => $invoice->tanggal->format('d/m/Y'),
                         'tanggal_jatuh_tempo' => $invoice->tanggal_jatuh_tempo ? $invoice->tanggal_jatuh_tempo->format('d/m/Y') : '-',
                         'total_faktur' => $invoice->grand_total,
-                        'sudah_dibayar' => $invoice->total_dibayar,
+                        'sudah_dibayar' => $sudahDibayarAdjusted,
                         'total_retur' => $totalReturApproved,
                         'sisa_tagihan' => $sisaPiutangSetelahRetur,
                         'sisa_tagihan_original' => $invoice->sisa_piutang,
                         'status_piutang' => $invoice->status_piutang,
                         'is_jatuh_tempo' => $invoice->checkJatuhTempo(),
                         'hari_keterlambatan' => $invoice->hari_keterlambatan,
-                        'suggested_payment' => $sisaPiutangSetelahRetur // Default suggestion
+                        'suggested_payment' => $dilunasiByThis > 0 ? $dilunasiByThis : $sisaPiutangSetelahRetur,
+                        'jumlah_dilunasi_saat_ini' => $dilunasiByThis,
                     ];
                 });
 
@@ -423,23 +442,29 @@ class PembayaranPiutangController extends Controller
      */
     public function edit(Pembayaran $pembayaran)
     {
-        $pembayaran->load(['customer', 'details.transaksi']);
+        if ($pembayaran->isCancelled()) {
+            return redirect()->route('pembayaran-piutang.show', $pembayaran->id)
+                ->with('error', 'Pembayaran yang sudah dibatalkan tidak dapat diedit.');
+        }
+
+        $pembayaran->load(['customer', 'details.transaksi', 'notaKreditDetails']);
         $customers = Customer::orderBy('nama')->get();
         
         return view('pembayaran_piutang.edit', compact('pembayaran', 'customers'));
     }
 
     /**
-     * Update the specified pembayaran
+     * Update the specified pembayaran (including confirmed ones).
+     * Reverses old allocations, then reapplies new payment details.
      */
-    public function update(Request $request, Pembayaran $pembayaran): JsonResponse
+    public function update(Request $request, Pembayaran $pembayaran)
     {
-        // Only allow editing if not confirmed
-        if ($pembayaran->isConfirmed()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Pembayaran yang sudah dikonfirmasi tidak dapat diedit'
-            ], 400);
+        if ($pembayaran->isCancelled()) {
+            $message = 'Pembayaran yang sudah dibatalkan tidak dapat diedit';
+            if ($request->wantsJson()) {
+                return response()->json(['success' => false, 'message' => $message], 400);
+            }
+            return redirect()->back()->with('error', $message);
         }
 
         $request->validate([
@@ -448,31 +473,158 @@ class PembayaranPiutangController extends Controller
             'metode_pembayaran' => 'required|string',
             'cara_bayar' => 'required|string',
             'no_referensi' => 'nullable|string',
-            'keterangan' => 'nullable|string'
+            'keterangan' => 'nullable|string',
+            'payment_details' => 'required|array|min:1',
+            'payment_details.*.transaksi_id' => 'required|exists:transaksi,id',
+            'payment_details.*.jumlah_dilunasi' => 'required|numeric|min:0.01',
         ]);
 
+        DB::beginTransaction();
         try {
+            $pembayaran->load(['details', 'notaKreditDetails', 'customer']);
+            $customer = $pembayaran->customer;
+            $affectedTransaksiIds = $pembayaran->details->pluck('transaksi_id')->unique()->values()->all();
+
+            // Reverse nota kredit usage
+            foreach ($pembayaran->notaKreditDetails as $nkDetail) {
+                $notaKredit = NotaKredit::find($nkDetail->nota_kredit_id);
+                if ($notaKredit) {
+                    $notaKredit->sisa_kredit += $nkDetail->jumlah_digunakan;
+                    if ($notaKredit->status === 'processed') {
+                        $notaKredit->status = 'approved';
+                    }
+                    $notaKredit->save();
+                }
+                $nkDetail->delete();
+            }
+
+            // Reverse Kas entry for previous tunai payment
+            if (strtolower((string) $pembayaran->metode_pembayaran) === 'tunai') {
+                Kas::create([
+                    'name' => "Revisi Pembayaran Piutang: {$pembayaran->no_pembayaran}",
+                    'description' => "Pembalikan pembayaran piutang (edit) dari {$customer->nama}",
+                    'qty' => $pembayaran->total_bayar,
+                    'type' => 'Kredit',
+                    'saldo' => 0,
+                    'is_manual' => false,
+                ]);
+            }
+
+            // Remove old payment details
+            $pembayaran->details()->delete();
+
             $pembayaran->update([
                 'tanggal_bayar' => $request->tanggal_bayar,
                 'total_bayar' => $request->total_bayar,
                 'metode_pembayaran' => $request->metode_pembayaran,
                 'cara_bayar' => $request->cara_bayar,
                 'no_referensi' => $request->no_referensi,
-                'keterangan' => $request->keterangan
+                'keterangan' => $request->keterangan,
+                'status' => 'confirmed',
+                'confirmed_by' => auth()->id(),
+                'confirmed_at' => $pembayaran->confirmed_at ?? now(),
             ]);
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Pembayaran berhasil diupdate'
+            // Recalc old invoices first (after details deleted, confirmed payment no longer counts)
+            foreach ($affectedTransaksiIds as $transaksiId) {
+                PembayaranDetail::updateTransaksiPiutangStatus($transaksiId);
+            }
+
+            // Create new payment details
+            foreach ($request->payment_details as $detail) {
+                $transaksi = Transaksi::find($detail['transaksi_id']);
+                $sudahDibayar = $transaksi->total_dibayar ?? 0;
+                $jumlahDilunasi = $detail['jumlah_dilunasi'];
+                $sisaTagihan = max(0, ($transaksi->grand_total - $sudahDibayar - $jumlahDilunasi));
+
+                PembayaranDetail::create([
+                    'pembayaran_id' => $pembayaran->id,
+                    'transaksi_id' => $detail['transaksi_id'],
+                    'no_transaksi' => $transaksi->no_transaksi,
+                    'total_faktur' => $transaksi->grand_total,
+                    'sudah_dibayar' => $sudahDibayar,
+                    'jumlah_dilunasi' => $jumlahDilunasi,
+                    'sisa_tagihan' => $sisaTagihan,
+                    'status_pelunasan' => $sisaTagihan <= 0 ? 'lunas' : 'sebagian',
+                    'keterangan' => 'Pembayaran via ' . $pembayaran->no_pembayaran . ' (diedit)'
+                ]);
+
+                PembayaranDetail::updateTransaksiPiutangStatus($detail['transaksi_id']);
+                $affectedTransaksiIds[] = $detail['transaksi_id'];
+            }
+
+            // Optional nota kredit on edit
+            if ($request->nota_kredit_details) {
+                foreach ($request->nota_kredit_details as $detail) {
+                    $notaKredit = NotaKredit::find($detail['nota_kredit_id']);
+                    $jumlahDigunakan = $detail['jumlah_digunakan'];
+                    $sisaNotaKredit = $notaKredit->sisa_kredit - $jumlahDigunakan;
+
+                    PembayaranPiutangNotaKredit::create([
+                        'pembayaran_id' => $pembayaran->id,
+                        'nota_kredit_id' => $detail['nota_kredit_id'],
+                        'no_nota_kredit' => $notaKredit->no_nota_kredit,
+                        'total_nota_kredit' => $notaKredit->total_kredit,
+                        'jumlah_digunakan' => $jumlahDigunakan,
+                        'sisa_nota_kredit' => $sisaNotaKredit,
+                        'keterangan' => 'Digunakan untuk pembayaran ' . $pembayaran->no_pembayaran
+                    ]);
+
+                    $notaKredit->update([
+                        'sisa_kredit' => $sisaNotaKredit,
+                        'status' => $sisaNotaKredit <= 0 ? 'processed' : 'approved'
+                    ]);
+                }
+            }
+
+            // Refresh header piutang snapshot
+            $totalPiutangCustomer = Transaksi::where('kode_customer', $customer->kode_customer)
+                ->whereIn('status_piutang', ['belum_dibayar', 'sebagian'])
+                ->sum('sisa_piutang');
+
+            $pembayaran->update([
+                'total_piutang' => $totalPiutangCustomer + $request->total_bayar,
+                'sisa_piutang' => $totalPiutangCustomer,
             ]);
+
+            if (strtolower($request->metode_pembayaran) === 'tunai') {
+                Kas::create([
+                    'name' => "Pembayaran Piutang: {$pembayaran->no_pembayaran}",
+                    'description' => "Pembayaran piutang (hasil edit) dari {$customer->nama}",
+                    'qty' => $request->total_bayar,
+                    'type' => 'Debit',
+                    'saldo' => 0,
+                    'is_manual' => false,
+                ]);
+            }
+
+            $this->adjustKasSaldo();
+
+            DB::commit();
+
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Pembayaran berhasil diupdate'
+                ]);
+            }
+
+            return redirect()
+                ->route('pembayaran-piutang.show', $pembayaran->id)
+                ->with('success', 'Pembayaran berhasil diupdate.');
 
         } catch (\Exception $e) {
+            DB::rollBack();
             Log::error('Error updating pembayaran:', ['message' => $e->getMessage()]);
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Terjadi kesalahan: ' . $e->getMessage()
-            ], 500);
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Terjadi kesalahan: ' . $e->getMessage()
+                ], 500);
+            }
+
+            return redirect()->back()->with('error', 'Terjadi kesalahan: ' . $e->getMessage());
         }
     }
 
@@ -481,11 +633,10 @@ class PembayaranPiutangController extends Controller
      */
     public function destroy(Pembayaran $pembayaran): JsonResponse
     {
-        // Only allow deletion if not confirmed
         if ($pembayaran->isConfirmed()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Pembayaran yang sudah dikonfirmasi tidak dapat dihapus'
+                'message' => 'Pembayaran yang sudah dikonfirmasi tidak dapat dihapus. Batalkan pembayaran terlebih dahulu.'
             ], 400);
         }
 
@@ -536,17 +687,55 @@ class PembayaranPiutangController extends Controller
     }
 
     /**
-     * Cancel pembayaran
+     * Cancel pembayaran and restore piutang / nota kredit / kas
      */
     public function cancel(Pembayaran $pembayaran): JsonResponse
     {
+        if ($pembayaran->isCancelled()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Pembayaran sudah dibatalkan sebelumnya'
+            ], 400);
+        }
+
+        DB::beginTransaction();
         try {
+            $pembayaran->load(['details', 'notaKreditDetails', 'customer']);
+            $customer = $pembayaran->customer;
+
+            // Restore nota kredit
+            foreach ($pembayaran->notaKreditDetails as $nkDetail) {
+                $notaKredit = NotaKredit::find($nkDetail->nota_kredit_id);
+                if ($notaKredit) {
+                    $notaKredit->sisa_kredit += $nkDetail->jumlah_digunakan;
+                    if ($notaKredit->status === 'processed') {
+                        $notaKredit->status = 'approved';
+                    }
+                    $notaKredit->save();
+                }
+            }
+
+            // Reverse Kas for tunai
+            if (strtolower((string) $pembayaran->metode_pembayaran) === 'tunai') {
+                Kas::create([
+                    'name' => "Batal Pembayaran Piutang: {$pembayaran->no_pembayaran}",
+                    'description' => "Pembatalan pembayaran piutang dari " . ($customer->nama ?? '-'),
+                    'qty' => $pembayaran->total_bayar,
+                    'type' => 'Kredit',
+                    'saldo' => 0,
+                    'is_manual' => false,
+                ]);
+                $this->adjustKasSaldo();
+            }
+
             $pembayaran->cancel(auth()->id());
 
-            // Restore transaksi piutang status
+            // Restore transaksi piutang status (confirmed-only totals will exclude this payment)
             foreach ($pembayaran->details as $detail) {
                 PembayaranDetail::updateTransaksiPiutangStatus($detail->transaksi_id);
             }
+
+            DB::commit();
 
             return response()->json([
                 'success' => true,
@@ -554,6 +743,7 @@ class PembayaranPiutangController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            DB::rollBack();
             Log::error('Error cancelling pembayaran:', ['message' => $e->getMessage()]);
 
             return response()->json([

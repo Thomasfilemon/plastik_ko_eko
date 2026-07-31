@@ -86,7 +86,7 @@ class KodeBarangController extends Controller
         $validated['cost'] = 0; // set default cost dari master barang
         
         // Set default values if not provided
-        $validated['unit_dasar'] = $validated['unit_dasar'] ?? 'LBR';
+        $validated['unit_dasar'] = strtoupper(trim($validated['unit_dasar'] ?? 'LBR'));
         $validated['price'] = $validated['price'] ?? 0;
         $validated['harga_jual'] = $validated['harga_jual'] ?? $validated['price'];
         $validated['ongkos_kuli_default'] = $validated['ongkos_kuli_default'] ?? 0;
@@ -165,6 +165,7 @@ class KodeBarangController extends Controller
         $validated = $request->validate([
             'grup_barang_id' => 'required|string|max:255',
             'attribute' => 'required|string|max:255',
+            'name' => 'required|string|max:255',
             'kode_barang' => 'required|string|max:255',
             'unit_dasar' => 'required|string|max:20',
             'harga_jual' => 'required|numeric|min:0',
@@ -178,6 +179,10 @@ class KodeBarangController extends Controller
             'kode_barang.required' => 'Item code is required',
             'kode_barang.string' => 'Item code must be a valid string',
             'kode_barang.max' => 'Item code may not be greater than 255 characters',
+
+            'name.required' => 'Nama barang harus diisi',
+            'name.string' => 'Nama barang harus berupa teks',
+            'name.max' => 'Nama barang maksimal 255 karakter',
 
             'attribute.required' => 'Panel name is required',
             'attribute.string' => 'Panel name must be a valid string',
@@ -196,6 +201,7 @@ class KodeBarangController extends Controller
         ]);
 
         $code = KodeBarang::findOrFail($id);
+        $oldKodeBarang = $code->kode_barang;
         
         // Cari grup barang berdasarkan nama yang dipilih
         $grupBarang = \App\Models\GrupBarang::where('name', $validated['grup_barang_id'])->first();
@@ -205,11 +211,26 @@ class KodeBarangController extends Controller
         
         // Update attribute berdasarkan grup barang yang dipilih
         $validated['attribute'] = $validated['grup_barang_id'];
+        $validated['unit_dasar'] = strtoupper(trim($validated['unit_dasar']));
         
         // Hapus grup_barang_id dari data yang akan diupdate
         unset($validated['grup_barang_id']);
         
         $code->update($validated);
+
+        // Sync nama on related panels & stock records
+        $newKode = $validated['kode_barang'] ?? $oldKodeBarang;
+        \App\Models\Panel::where('group_id', $oldKodeBarang)->update([
+            'name' => $validated['name'],
+            'group_id' => $newKode,
+        ]);
+
+        $stock = \App\Models\Stock::where('kode_barang', $oldKodeBarang)->first();
+        if ($stock) {
+            $stock->nama_barang = $validated['name'];
+            $stock->kode_barang = $newKode;
+            $stock->save();
+        }
 
         return redirect()->route('code.view-code')
             ->with('success', "Successfully updated code!");

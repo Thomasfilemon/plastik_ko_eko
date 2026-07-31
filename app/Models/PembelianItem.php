@@ -28,6 +28,9 @@ class PembelianItem extends Model
         'keterangan',
         'harga',
         'qty',
+        'satuan',
+        'satuan_besar',
+        'qty_besar',
         'diskon',
         'total',
     ];

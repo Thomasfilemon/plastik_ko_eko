@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Models\StokOwner;
 
 class Transaksi extends Model
@@ -75,7 +76,7 @@ class Transaksi extends Model
         return $prefix . $date . '-' . $newNumber;
     }
 
-    public function items()
+    public function items(): HasMany
     {
         return $this->hasMany(TransaksiItem::class, 'transaksi_id');
     }
