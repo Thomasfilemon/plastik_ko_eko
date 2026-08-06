@@ -101,15 +101,17 @@ class Pembelian extends Model
         return $this->hasMany(PembayaranUtangSupplierDetail::class, 'pembelian_id');
     }
 
-    // Scopes for payment status
+    // Scopes for payment status (exclude cancelled purchases)
     public function scopeBelumDibayar($query)
     {
-        return $query->whereIn('status_utang', ['belum_dibayar', 'sebagian']);
+        return $query->where('status', '!=', 'canceled')
+            ->whereIn('status_utang', ['belum_dibayar', 'sebagian']);
     }
 
     public function scopeJatuhTempo($query)
     {
-        return $query->where('tanggal', '<=', now()->subDays(30));
+        return $query->where('status', '!=', 'canceled')
+            ->where('tanggal', '<=', now()->subDays(30));
     }
 
     // Boot method untuk auto-calculate sisa_utang

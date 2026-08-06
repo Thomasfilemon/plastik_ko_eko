@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Auth;
 use App\Models\PembayaranUtangSupplier;
 use App\Models\PembayaranUtangSupplierDetail;
 use App\Models\PembayaranUtangSupplierNotaDebit;
@@ -29,8 +30,13 @@ class PembayaranUtangSupplierController extends Controller
         $summary = [
             'total_pembayaran_hari_ini' => PembayaranUtangSupplier::getTotalPembayaranHariIni(),
             'total_pembayaran_bulan_ini' => PembayaranUtangSupplier::getTotalPembayaranBulanIni(),
-            'total_utang_tertagih' => Pembelian::whereIn('status_utang', ['belum_dibayar', 'sebagian'])->sum('sisa_utang'),
-            'total_utang_jatuh_tempo' => Pembelian::where('tanggal', '<=', now()->subDays(30))->sum('sisa_utang')
+            'total_utang_tertagih' => Pembelian::where('status', '!=', 'canceled')
+                ->whereIn('status_utang', ['belum_dibayar', 'sebagian'])
+                ->sum('sisa_utang'),
+            'total_utang_jatuh_tempo' => Pembelian::where('status', '!=', 'canceled')
+                ->where('tanggal', '<=', now()->subDays(30))
+                ->whereIn('status_utang', ['belum_dibayar', 'sebagian'])
+                ->sum('sisa_utang')
         ];
 
         return view('pembayaran_utang_supplier.index', compact('pembayarans', 'summary'));
@@ -59,6 +65,7 @@ class PembayaranUtangSupplierController extends Controller
         $supplier = Supplier::find($request->supplier_id);
         
         $invoices = Pembelian::where('kode_supplier', $supplier->kode_supplier)
+            ->where('status', '!=', 'canceled')
             ->whereIn('status_utang', ['belum_dibayar', 'sebagian'])
             ->orderBy('tanggal', 'asc')
             ->get()
@@ -162,8 +169,8 @@ class PembayaranUtangSupplierController extends Controller
                 'no_referensi' => $request->no_referensi,
                 'keterangan' => $request->keterangan,
                 'status' => 'confirmed', // Auto confirm for now
-                'created_by' => auth()->id(),
-                'confirmed_by' => auth()->id(),
+                'created_by' => Auth::id(),
+                'confirmed_by' => Auth::id(),
                 'confirmed_at' => now()
             ]);
 
@@ -379,7 +386,7 @@ class PembayaranUtangSupplierController extends Controller
         try {
             $pembayaranUtangSupplier->update([
                 'status' => 'confirmed',
-                'confirmed_by' => auth()->id(),
+                'confirmed_by' => Auth::id(),
                 'confirmed_at' => now()
             ]);
 

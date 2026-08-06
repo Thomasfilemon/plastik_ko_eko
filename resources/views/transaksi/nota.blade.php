@@ -7,10 +7,16 @@ use Riskihajar\Terbilang\Facades\Terbilang;
 <head>
     <meta charset="UTF-8">
     <title>Nota Transaksi</title>
-    <link href="https://fonts.googleapis.com/css2?family=DejaVu+Sans+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        /* Epson LX-310 continuous form (Half Letter) */
-        * { box-sizing: border-box; }
+        /* Epson LX-310: system Courier only (no web fonts — cleaner on impact printers) */
+        * {
+            box-sizing: border-box;
+            font-family: "Courier New", Courier, "Lucida Console", monospace !important;
+            font-weight: normal !important;
+            font-style: normal !important;
+            -webkit-font-smoothing: none;
+            font-smooth: never;
+        }
         @page {
             size: 215.9mm 139.7mm;
             /* 5mm top so printer feed does not cut the header */
@@ -23,7 +29,7 @@ use Riskihajar\Terbilang\Facades\Terbilang;
             padding: 0;
         }
         body {
-            font-family: 'Courier New', 'DejaVu Sans Mono', monospace;
+            font-family: "Courier New", Courier, "Lucida Console", monospace;
             font-size: 10pt;
             line-height: 1.15;
             color: #000;
@@ -38,7 +44,7 @@ use Riskihajar\Terbilang\Facades\Terbilang;
             display: block;
         }
         .header { text-align: center; line-height: 1.15; margin-bottom: 1.5mm; }
-        .header strong { font-size: 11pt; }
+        .header strong { font-size: 11pt; font-weight: bold !important; }
         .info-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5mm; font-size: 9pt; width: 100%; }
         .info-left-section { flex-basis: 65%; text-align: left; }
         .info-right-section { flex-basis: 35%; text-align: right; }
@@ -51,7 +57,7 @@ use Riskihajar\Terbilang\Facades\Terbilang;
             word-wrap: break-word;
             white-space: normal;
         }
-        .item-table th { font-weight: bold; text-align: center; font-size: 9pt; }
+        .item-table th { font-weight: bold !important; text-align: center; font-size: 9pt; }
         .item-table th:nth-child(1), .item-table td:nth-child(1) { width: 5%; text-align: center; }
         .item-table th:nth-child(2), .item-table td:nth-child(2) { width: 34%; text-align: left; }
         .item-table th:nth-child(3), .item-table td:nth-child(3) { width: 14%; text-align: center; }
@@ -64,12 +70,12 @@ use Riskihajar\Terbilang\Facades\Terbilang;
         .footer-container { width: 100%; margin-top: 1.5mm; padding-top: 1mm; }
         .summary-table { width: 100%; border-collapse: collapse; font-size: 9pt; margin-bottom: 1.5mm; }
         .summary-table th, .summary-table td { border: 1px solid #000; padding: 1mm 1.5mm; }
-        .summary-table th { text-align: left; font-weight: bold; }
+        .summary-table th { text-align: left; font-weight: bold !important; }
         .notes-details-wrapper { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: nowrap; width: 100%; margin-top: 1mm; }
         .notes-section { flex: 1 1 0%; min-width: 45%; padding-right: 2mm; font-size: 8.5pt; line-height: 1.25; }
         .details-row { flex: 0 1 auto; min-width: 40%; display: flex; flex-direction: column; font-size: 8.5pt; text-align: right; padding-left: 2mm; }
         .payment-info { margin-bottom: 1mm; }
-        .terbilang-section { font-style: italic; }
+        .terbilang-section { font-style: normal; }
         .signature-row {
             width: 100%;
             display: flex;
@@ -92,6 +98,9 @@ use Riskihajar\Terbilang\Facades\Terbilang;
         .page-break { page-break-after: always; break-after: page; }
         @media print {
             .no-print { display: none !important; }
+            * {
+                font-family: "Courier New", Courier, monospace !important;
+            }
             html, body { width: 215.9mm; height: auto; }
             .page {
                 height: auto;
@@ -184,10 +193,10 @@ use Riskihajar\Terbilang\Facades\Terbilang;
             </thead>
             <tbody>
                 @php $rowCount = 0; @endphp
-                @foreach ($chunk as $i => $item)
+                @foreach ($chunk as $item)
                     @php $rowCount++; @endphp
                     <tr>
-                        <td class="center">{{ (($pageNum - 1) * $itemsPerPage) + $i + 1 }}</td>
+                        <td class="center">{{ (($pageNum - 1) * $itemsPerPage) + $loop->iteration }}</td>
                         <td>{{ $item->nama_barang }}</td>
                         <td class="center">
                             @if(!empty($item->satuan_besar))

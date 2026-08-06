@@ -838,11 +838,14 @@ class PembelianController extends Controller
             }
             
             // Update the purchase as canceled - include full timestamp
+            // Clear supplier utang so cancelled kredit invoices no longer appear as tagihan
             $pembelian->update([
                 'status' => 'canceled',
                 'canceled_by' => $canceledBy,
                 'canceled_at' => now(), // Stores full timestamp
-                'cancel_reason' => $request->cancel_reason
+                'cancel_reason' => $request->cancel_reason,
+                'sisa_utang' => 0,
+                'status_utang' => 'lunas',
             ]);
             
             DB::commit();

@@ -212,10 +212,10 @@ use Riskihajar\Terbilang\Facades\Terbilang;
             </thead>
             <tbody>
                 @php $rowCount = 0; @endphp
-                @foreach ($chunk as $i => $item)
+                @foreach ($chunk as $item)
                     @php $rowCount++; @endphp
                     <tr>
-                        <td class="center">{{ (($pageNum - 1) * $itemsPerPage) + $i + 1 }}</td>
+                        <td class="center">{{ (($pageNum - 1) * $itemsPerPage) + $loop->iteration }}</td>
                         <td>{{ $item->nama_barang }}</td>
                         <td class="center">
                             @if(!empty($item->satuan_besar))
