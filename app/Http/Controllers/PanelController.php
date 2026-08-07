@@ -21,7 +21,7 @@ class PanelController extends Controller
     /**
      * Display inventory summary
      */
-    protected $stockController;
+    protected StockController $stockController;
 
     public function __construct(StockController $stockController)
     {
@@ -67,6 +67,34 @@ class PanelController extends Controller
         // Get the data from the paginator
         $panels = $panelsPaginator->items();
 
+        // Last sold harga jual per kode_barang (exclude cancelled sales)
+        $kodeList = collect($panels)->pluck('kode_barang')->filter()->unique()->values();
+        $lastSoldHarga = [];
+        if ($kodeList->isNotEmpty()) {
+            $lastSoldHarga = \App\Models\TransaksiItem::query()
+                ->select('transaksi_items.kode_barang', 'transaksi_items.harga')
+                ->join('transaksi', 'transaksi.no_transaksi', '=', 'transaksi_items.no_transaksi')
+                ->whereIn('transaksi_items.kode_barang', $kodeList)
+                ->where(function ($q) {
+                    $q->whereNull('transaksi.status')
+                        ->orWhere('transaksi.status', '!=', 'canceled');
+                })
+                ->whereIn('transaksi_items.id', function ($q) use ($kodeList) {
+                    $q->selectRaw('MAX(ti.id)')
+                        ->from('transaksi_items as ti')
+                        ->join('transaksi as t', 't.no_transaksi', '=', 'ti.no_transaksi')
+                        ->whereIn('ti.kode_barang', $kodeList)
+                        ->where(function ($q2) {
+                            $q2->whereNull('t.status')
+                                ->orWhere('t.status', '!=', 'canceled');
+                        })
+                        ->groupBy('ti.kode_barang');
+                })
+                ->get()
+                ->pluck('harga', 'kode_barang')
+                ->toArray();
+        }
+
         // Manually group the panels
         $groupedPanels = [];
         foreach ($panels as $panel) {
@@ -74,11 +102,11 @@ class PanelController extends Controller
             $goodStock = $stock ? $stock->good_stock : 0;
             $unit = $stock ? $stock->satuan : 'PCS';
 
-            // $pricePerSmallUnit = $panel->price; // jika sudah per PAK
-            // $costPerSmallUnit = $panel->cost;   // jika sudah per PAK
-
-            $costPerUnit = ($panel->konversi && $panel->konversi != 0) ? $panel->cost / $panel->konversi : $panel->cost;
-            $pricePerUnit = ($panel->konversi && $panel->konversi != 0) ? $panel->price / $panel->konversi : $panel->price;
+            // cost is already per satuan dasar (updated on last pembelian)
+            $costPerUnit = (float) ($panel->cost ?? 0);
+            $hargaJual = isset($lastSoldHarga[$panel->kode_barang])
+                ? (float) $lastSoldHarga[$panel->kode_barang]
+                : (float) ($panel->harga_jual ?? $panel->price ?? 0);
 
             $key = $panel->name . '-' . $panel->price . '-' . $panel->kode_barang;
 
@@ -98,8 +126,8 @@ class PanelController extends Controller
                     'id' => $panel->id,
                     'name' => $panel->name,
                     'cost' => $costPerUnit,
-                    'price' => $pricePerUnit,
-                    'harga_per_satuan_dasar' => $panel->harga_jual ?? $panel->price,
+                    'price' => $hargaJual,
+                    'harga_per_satuan_dasar' => $hargaJual,
                     'unit_dasar' => $panel->unit_dasar ?? 'PCS',
                     'group_id' => $panel->kode_barang,
                     'group' => $panel->attribute,
@@ -108,12 +136,12 @@ class PanelController extends Controller
                     'unit' => $stock ? $stock->satuan : '-',
                     'satuan_besar' => $unitConversions,
                     'total_cost' => $costPerUnit * $goodStock,
-                    'total_price' => $pricePerUnit * $goodStock
+                    'total_price' => $hargaJual * $goodStock
                 ];
             } else {
                 $groupedPanels[$key]['quantity'] += $goodStock;
                 $groupedPanels[$key]['total_cost'] += $costPerUnit * $goodStock;
-                $groupedPanels[$key]['total_price'] += $pricePerUnit * $goodStock;
+                $groupedPanels[$key]['total_price'] += $hargaJual * $goodStock;
             }
         }
 

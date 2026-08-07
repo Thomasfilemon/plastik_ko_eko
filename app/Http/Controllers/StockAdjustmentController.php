@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\Stock;
 use App\Models\StockAdjustment;
+use App\Models\StockBatch;
 use App\Models\KodeBarang;
 use App\Models\Panel;
 use App\Models\StockMutation;
+use App\Services\FifoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -14,8 +16,8 @@ use Illuminate\Support\Facades\Log;
 
 class StockAdjustmentController extends Controller
 {
-    protected $panelController;
-    protected $stockController;
+    protected ?PanelController $panelController;
+    protected ?StockController $stockController;
 
     public function __construct(
         ?PanelController $panelController = null,
@@ -78,30 +80,40 @@ class StockAdjustmentController extends Controller
     {
         // Get the KodeBarang model by kode_barang
         $kodeBarang = KodeBarang::where('kode_barang', $kodeBarang)->firstOrFail();
-        
-        // Get current panel count for accurate stock value
-        $currentPanelCount = Panel::where('group_id', $kodeBarang->kode_barang)
-                                 ->where('available', true)
-                                 ->count();
-        
+
         // Get the stock record (or create it if it doesn't exist)
         $stock = Stock::where('kode_barang', $kodeBarang->kode_barang)->first();
-        
+
         if (!$stock) {
-            // If stock record doesn't exist, create one
             $stock = new Stock();
             $stock->kode_barang = $kodeBarang->kode_barang;
             $stock->nama_barang = $kodeBarang->name;
-            $stock->good_stock = $currentPanelCount;
+            $stock->good_stock = 0;
             $stock->save();
-        } else {
-            // Update stock to match actual panel count
-            if ($stock->good_stock != $currentPanelCount) {
-                $stock->good_stock = $currentPanelCount;
-                $stock->save();
-            }
         }
-        
+
+        // Penjualan checks FIFO StockBatch — heal gaps left by old adjustments
+        $fifoService = new FifoService();
+        $fifoQty = (float) $fifoService->getStokTersedia($kodeBarang->id);
+        $goodStock = (float) $stock->good_stock;
+
+        if ($goodStock > $fifoQty) {
+            $gap = $goodStock - $fifoQty;
+            StockBatch::create([
+                'kode_barang_id' => $kodeBarang->id,
+                'qty_masuk' => $gap,
+                'qty_sisa' => $gap,
+                'harga_beli' => $kodeBarang->cost ?? 0,
+                'tanggal_masuk' => now(),
+                'keterangan' => 'Sync stock adjustment ke FIFO',
+                'tipe_batch' => 'adjustment',
+                'batch_number' => 'SYNC-ADJ-' . now()->format('YmdHis'),
+            ]);
+        } elseif ($goodStock < $fifoQty) {
+            $stock->good_stock = $fifoQty;
+            $stock->save();
+        }
+
         return view('stock.adjustment.adjust', compact('stock', 'kodeBarang'));
     }
 
@@ -122,18 +134,17 @@ class StockAdjustmentController extends Controller
         if (!$stock) {
             return redirect()->back()->with('error', 'Stock tidak ditemukan.');
         }
-        
-        // Recheck current panel count to ensure accuracy
-        $currentPanelCount = Panel::where('group_id', $validated['kode_barang'])
-                                 ->where('available', true)
-                                 ->count();
-        
-        // If actual panel count doesn't match the "before" quantity, update the validated data
-        if ($currentPanelCount != $validated['quantity_before']) {
-            $validated['quantity_before'] = $currentPanelCount;
+
+        $kodeBarangModel = KodeBarang::where('kode_barang', $validated['kode_barang'])->first();
+        if (!$kodeBarangModel) {
+            return redirect()->back()->with('error', 'Kode barang tidak ditemukan di master.');
         }
-        
-        $diff = $validated['quantity_after'] - $validated['quantity_before'];
+
+        // Use FIFO stock as "before" — same source penjualan checks
+        $fifoService = new FifoService();
+        $fifoBefore = (int) $fifoService->getStokTersedia($kodeBarangModel->id);
+        $validated['quantity_before'] = $fifoBefore;
+        $diff = (int) $validated['quantity_after'] - $fifoBefore;
         
         DB::beginTransaction();
         try {
@@ -179,7 +190,22 @@ class StockAdjustmentController extends Controller
                     'Stock Adjustment: ' . $validated['keterangan'],
                     Auth::user()->name
                 );
+
+                // Also add FIFO batch so penjualan can sell the adjusted stock
+                StockBatch::create([
+                    'kode_barang_id' => $kodeBarangModel->id,
+                    'qty_masuk' => abs($diff),
+                    'qty_sisa' => abs($diff),
+                    'harga_beli' => $kodeBarangModel->cost ?? 0,
+                    'tanggal_masuk' => now(),
+                    'keterangan' => 'Stock Adjustment: ' . $validated['keterangan'],
+                    'tipe_batch' => 'adjustment',
+                    'batch_number' => $transactionNo,
+                ]);
             } elseif ($diff < 0) {
+                // Reduce FIFO batches first (penjualan source of truth)
+                $this->reduceFifoBatches($kodeBarangModel->id, abs($diff));
+
                 // This is a decrease - record as a "sale" in stock mutation
                 $this->stockController->recordSale(
                     $stock->kode_barang,
@@ -200,6 +226,11 @@ class StockAdjustmentController extends Controller
                 $stock->save();
             }
             
+            // Keep stocks.good_stock aligned with FIFO after adjustment
+            $stock->refresh();
+            $stock->good_stock = $fifoService->getStokTersedia($kodeBarangModel->id);
+            $stock->save();
+
             // If this is panel inventory, we need to add/remove panels accordingly
             if ($diff != 0) {
                 $this->adjustPanelInventory($stock->kode_barang, $diff);
@@ -237,6 +268,35 @@ class StockAdjustmentController extends Controller
         return view('stock.adjustment.show', compact('adjustment', 'mutation'));
     }
     
+    /**
+     * Reduce FIFO batches only (stocks.good_stock is updated separately).
+     */
+    private function reduceFifoBatches(int $kodeBarangId, float $qty): void
+    {
+        $batches = StockBatch::byKodeBarang($kodeBarangId)
+            ->tersisa()
+            ->fifo()
+            ->lockForUpdate()
+            ->get();
+
+        $qtyTersisa = $qty;
+
+        foreach ($batches as $batch) {
+            if ($qtyTersisa <= 0) {
+                break;
+            }
+
+            $qtyAmbil = min($qtyTersisa, (float) $batch->qty_sisa);
+            $batch->qty_sisa -= $qtyAmbil;
+            $batch->save();
+            $qtyTersisa -= $qtyAmbil;
+        }
+
+        if ($qtyTersisa > 0) {
+            throw new \Exception("Stok FIFO tidak mencukupi untuk dikurangi. Kekurangan: {$qtyTersisa}");
+        }
+    }
+
     /**
      * Adjust panel inventory based on difference
      */
