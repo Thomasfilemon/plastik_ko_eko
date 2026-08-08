@@ -207,7 +207,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @if($tanggal_awal)
+                            @if($tanggal_awal || (isset($openingBalance) && abs($openingBalance) > 0.0001))
                                 <tr class="table-danger font-weight-bold">
                                     <td colspan="7">Saldo Awal</td>
                                     <td class="text-right">{{ number_format($openingBalance, 2) }}</td>
@@ -235,6 +235,12 @@
                                     <td colspan="8" class="text-center">Belum ada data mutasi untuk barang ini</td>
                                 </tr>
                             @endforelse
+                            @if(isset($selectedStock) && $mutations->isNotEmpty())
+                                <tr class="table-success font-weight-bold">
+                                    <td colspan="7">Good Stock (Master / Mutasi)</td>
+                                    <td class="text-right">{{ number_format($selectedStock->good_stock) }}</td>
+                                </tr>
+                            @endif
                         </tbody>
                     </table>
                 </div>

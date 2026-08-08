@@ -223,4 +223,55 @@ class UnitConversionService
         $availableUnits = $this->getAvailableUnits($kodeBarangId);
         return in_array($unit, $availableUnits);
     }
+
+    /**
+     * Format qty (unit dasar) as mixed besar + sisa kecil, e.g. "1 BAL 2 PCS".
+     * Uses the largest active conversion (highest nilai_konversi) when available.
+     */
+    public function formatMixedQty(float $qtyBase, ?KodeBarang $kodeBarang = null, ?UnitConversion $preferred = null): string
+    {
+        $qtyBase = round($qtyBase, 4);
+
+        $formatNum = static function (float $n): string {
+            if (abs($n - round($n)) < 0.0001) {
+                return number_format((int) round($n), 0, ',', '.');
+            }
+            return rtrim(rtrim(number_format($n, 2, ',', '.'), '0'), ',');
+        };
+
+        if (!$kodeBarang) {
+            return $formatNum($qtyBase) . ' PCS';
+        }
+
+        $unitDasar = strtoupper(trim($kodeBarang->unit_dasar ?? 'PCS'));
+
+        $conversion = $preferred;
+        if (!$conversion) {
+            $conversion = $kodeBarang->relationLoaded('unitConversions')
+                ? $kodeBarang->unitConversions->where('is_active', true)->sortByDesc('nilai_konversi')->first()
+                : UnitConversion::where('kode_barang_id', $kodeBarang->id)
+                    ->active()
+                    ->orderByDesc('nilai_konversi')
+                    ->first();
+        }
+
+        $faktor = $conversion ? (float) $conversion->nilai_konversi : 0;
+        if (!$conversion || $faktor <= 1) {
+            return $formatNum($qtyBase) . ' ' . $unitDasar;
+        }
+
+        $unitBesar = strtoupper(trim($conversion->unit_turunan));
+        $besar = (int) floor($qtyBase / $faktor);
+        $kecil = round($qtyBase - ($besar * $faktor), 4);
+
+        $parts = [];
+        if ($besar > 0) {
+            $parts[] = $formatNum((float) $besar) . ' ' . $unitBesar;
+        }
+        if ($kecil > 0.0001 || empty($parts)) {
+            $parts[] = $formatNum($kecil) . ' ' . $unitDasar;
+        }
+
+        return implode(' ', $parts);
+    }
 }

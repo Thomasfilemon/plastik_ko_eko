@@ -216,7 +216,7 @@ class TransaksiController extends Controller
             $isOwner = $user instanceof User && $user->hasRole('admin');
             // dd($isOwner);
 
-             // Jika user bukan owner dan melebihi kredit → stop
+             // Jika user bukan owner dan melebihi kredit ? stop
             if (!$isOwner && ($sisaPiutang + $request->grand_total) > $batasKredit) {
                 return response()->json([
                     'success' => false,
@@ -224,7 +224,7 @@ class TransaksiController extends Controller
                 ], 403);
             }
             
-            // Jika owner tapi melebihi kredit → warning saja
+            // Jika owner tapi melebihi kredit ? warning saja
             if ($isOwner && ($sisaPiutang + $request->grand_total) > $batasKredit) {
                 // dd('Warning');
                 session()->flash('warning', 'Customer sudah melewati batas kredit, tapi transaksi dibuat oleh owner.');
@@ -344,8 +344,10 @@ class TransaksiController extends Controller
                     $transaksi->no_transaksi,
                     $customerName . ' (' . $request->kode_customer . ')',
                     $qtyBase,
-                    $request->sales,
-                    $conv['satuan']
+                    $conv['satuan'] ?? 'LBR',
+                    'Sale transaction',
+                    $creator,
+                    $request->sales ?? 'default'
                 );
             }
 
@@ -601,7 +603,7 @@ class TransaksiController extends Controller
                     ]);
                 }
                 
-                // Record new sale in stock mutation
+                // Record new sale in stock mutation (tagged updated so laporan follows latest edit)
                 $this->stockController->recordSale(
                     $item['kodeBarang'],
                     $item['namaBarang'],
@@ -610,8 +612,10 @@ class TransaksiController extends Controller
                     $noTransaksi . ' (updated)',
                     $customerName . ' (' . $request->kode_customer . ')',
                     $qtyBase,
-                    $transaksi->sales,
-                    $conv['satuan']
+                    $conv['satuan'] ?? 'LBR',
+                    'Sale after nota edit: ' . ($request->edit_reason ?? ''),
+                    $editor,
+                    $transaksi->sales ?? 'default'
                 );
                 
                 // Mark panels as unavailable
@@ -660,7 +664,7 @@ class TransaksiController extends Controller
                     if ($difference != 0) {
                         Kas::create([
                             'name' => "Edit Transaksi: {$noTransaksi}",
-                            'description' => "Transaksi diubah oleh {$editor}. Total: " . number_format($originalGrandTotal, 0, ',', '.') . " → " . number_format($newGrandTotal, 0, ',', '.') . ". Alasan: {$request->edit_reason}",
+                            'description' => "Transaksi diubah oleh {$editor}. Total: " . number_format($originalGrandTotal, 0, ',', '.') . " ? " . number_format($newGrandTotal, 0, ',', '.') . ". Alasan: {$request->edit_reason}",
                             'qty' => abs($difference),
                             'type' => $difference > 0 ? 'Kredit' : 'Debit',
                             'saldo' => 0,

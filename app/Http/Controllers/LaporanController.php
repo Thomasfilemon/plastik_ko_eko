@@ -14,6 +14,7 @@ use App\Models\StockMutation;
 use App\Models\StokOwner;
 use App\Models\KodeBarang;
 use App\Models\Customer;
+use App\Services\UnitConversionService;
 use Carbon\Carbon;
 
 class LaporanController extends Controller
@@ -644,207 +645,121 @@ class LaporanController extends Controller
      */
     public function laporanStok(Request $request)
     {
-        // Get filter parameters
-        $kodeBarang = $request->get('kode_barang');
-        $namaBarang = $request->get('nama_barang');
-        $grupBarangId = $request->get('grup_barang');
+        // Same UX as Mutasi Stok: filter → Display Barang → detail panel
+        $kolom = $request->input('kolom', 'kode_barang');
+        $value = $request->input('value', $request->input('kode_barang', $request->input('nama_barang')));
+        $tanggal_awal = $request->input('tanggal_awal');
+        $tanggal_akhir = $request->input('tanggal_akhir');
+        $grupId = $request->input('grup_barang');
+        $selectedKodeBarang = $request->input('selected_kode_barang');
         $showBatches = (bool) $request->get('show_batches', false);
         $showPergerakan = (bool) $request->get('show_pergerakan', false);
-        $tanggalPergerakan = $request->get('tanggal_pergerakan', now()->format('Y-m-d'));
-        $jenisPergerakan = $request->get('jenis_pergerakan');
+
+        // Preserve legacy filter names when kolom/value not used
+        if (!$request->filled('value') && $request->filled('nama_barang') && !$request->filled('kode_barang')) {
+            $kolom = 'nama';
+            $value = $request->input('nama_barang');
+        } elseif (!$request->filled('value') && $request->filled('kode_barang')) {
+            $kolom = 'kode_barang';
+            $value = $request->input('kode_barang');
+        }
 
         try {
-            $query = StockBatch::with(['kodeBarang'])
-                ->where('qty_sisa', '>', 0);
+            $stocksQuery = \App\Models\Stock::select(
+                'stocks.kode_barang',
+                'stocks.nama_barang',
+                DB::raw('SUM(stocks.good_stock) as good_stock'),
+                DB::raw('SUM(stocks.bad_stock) as bad_stock'),
+                'stocks.satuan'
+            )->groupBy('stocks.kode_barang', 'stocks.nama_barang', 'stocks.satuan');
 
-            // Apply filters using when() for dynamic query building
-            $query->when($kodeBarang, function($q) use ($kodeBarang) {
-                return $q->whereHas('kodeBarang', function($subQ) use ($kodeBarang) {
-                    $subQ->where('kode_barang', 'like', "%{$kodeBarang}%");
+            $stocksQuery->when($value, function ($query) use ($kolom, $value) {
+                if ($kolom === 'nama') {
+                    return $query->where('stocks.nama_barang', 'like', "%{$value}%");
+                }
+                return $query->where('stocks.kode_barang', 'like', "%{$value}%");
+            });
+
+            $stocksQuery->when($grupId, function ($query, $grupId) {
+                return $query->whereIn('stocks.kode_barang', function ($q) use ($grupId) {
+                    $q->select('kode_barang')
+                        ->from('kode_barangs')
+                        ->where('grup_barang_id', $grupId);
                 });
             });
 
-            $query->when($namaBarang, function($q) use ($namaBarang) {
-                return $q->whereHas('kodeBarang', function($subQ) use ($namaBarang) {
-                    $subQ->where('name', 'like', "%{$namaBarang}%");
-                });
-            });
+            $stocks = $stocksQuery->get();
 
-            $query->when($grupBarangId, function($q) use ($grupBarangId) {
-                return $q->whereHas('kodeBarang', function($subQ) use ($grupBarangId) {
-                    $subQ->where('grup_barang_id', $grupBarangId);
-                });
-            });
+            // Extra display: e.g. "1 BAL 2 PCS" beside base-unit qty
+            $unitService = app(UnitConversionService::class);
+            $kodeBarangMap = KodeBarang::with(['unitConversions' => function ($q) {
+                    $q->where('is_active', true)->orderByDesc('nilai_konversi');
+                }])
+                ->whereIn('kode_barang', $stocks->pluck('kode_barang')->filter()->unique()->values())
+                ->get()
+                ->keyBy('kode_barang');
 
-            $stockBatches = $query->orderBy('tanggal_masuk', 'asc')->get();
+            foreach ($stocks as $stock) {
+                $kb = $kodeBarangMap->get($stock->kode_barang);
+                $stock->good_stock_mixed = $unitService->formatMixedQty((float) $stock->good_stock, $kb);
+                $stock->bad_stock_mixed = $unitService->formatMixedQty((float) $stock->bad_stock, $kb);
+            }
 
-            // Handle pergerakan barang jika diminta
-            $laporanData = collect([]);
-            $summary = [];
-            $pergerakanData = collect([]);
+            $selectedStock = null;
+            if ($selectedKodeBarang) {
+                $selectedStock = $stocks->where('kode_barang', $selectedKodeBarang)->first();
+            } elseif ($stocks->count() === 1) {
+                $selectedStock = $stocks->first();
+            }
 
-            if ($showPergerakan) {
-                // Query untuk stok masuk (pembelian, retur penjualan, dll)
-                $stokMasukQuery = StockMutation::whereDate('tanggal', $tanggalPergerakan)
-                    ->where('plus', '>', 0);
+            $mutations = collect([]);
+            $batches = collect([]);
+            $openingBalance = 0.0;
 
-                // Query untuk stok keluar (penjualan, retur pembelian, dll)
-                $stokKeluarQuery = StockMutation::whereDate('tanggal', $tanggalPergerakan)
-                    ->where('minus', '>', 0);
+            if ($selectedStock) {
+                $kodeBarangModel = KodeBarang::where('kode_barang', $selectedStock->kode_barang)->first();
 
-                // Apply filters using when() for dynamic query building
-                $applyFilters = function($query) use ($kodeBarang, $namaBarang, $grupBarangId) {
-                    $query->when($kodeBarang, function($q) use ($kodeBarang) {
-                        return $q->where('kode_barang', 'like', "%{$kodeBarang}%");
-                    })
-                    ->when($namaBarang, function($q) use ($namaBarang) {
-                        return $q->where('nama_barang', 'like', "%{$namaBarang}%");
-                    })
-                    ->when($grupBarangId, function($q) use ($grupBarangId) {
-                        // For StockMutation, we need to join with kode_barangs table to filter by grup_barang_id
-                        return $q->join('kode_barangs', 'stock_mutations.kode_barang', '=', 'kode_barangs.kode_barang')
-                            ->where('kode_barangs.grup_barang_id', $grupBarangId)
-                            ->select('stock_mutations.*', 'stock_mutations.tanggal as tanggal');
-                    });
-                };
-
-                $applyFilters($stokMasukQuery);
-                $applyFilters($stokKeluarQuery);
-
-                // Get data berdasarkan jenis pergerakan
-                $stokMasuk = collect([]);
-                $stokKeluar = collect([]);
-
-                if (!$jenisPergerakan || $jenisPergerakan === 'semua' || $jenisPergerakan === 'masuk') {
-                    $stokMasuk = $stokMasukQuery->orderBy('tanggal', 'asc')->get();
-                }
-
-                if (!$jenisPergerakan || $jenisPergerakan === 'semua' || $jenisPergerakan === 'keluar') {
-                    $stokKeluar = $stokKeluarQuery->orderBy('tanggal', 'asc')->get();
-                }
-
-                // Format data untuk display
-                foreach ($stokMasuk as $mutation) {
-                    $pergerakanData->push([
-                        'waktu' => optional($mutation->tanggal)->format('H:i:s') ?? '00:00:00',
-                        'kode_barang' => $mutation->kode_barang,
-                        'nama_barang' => $mutation->nama_barang,
-                        'no_transaksi' => $mutation->no_transaksi,
-                        'no_nota' => $mutation->no_nota,
-                        'supplier_customer' => $mutation->supplier_customer,
-                        'jenis_pergerakan' => 'MASUK',
-                        'qty_masuk' => $mutation->plus,
-                        'qty_keluar' => 0,
-                        'satuan' => $mutation->satuan,
-                        'keterangan' => $mutation->keterangan,
-                        'created_by' => $mutation->created_by
-                    ]);
-                }
-
-                foreach ($stokKeluar as $mutation) {
-                    $pergerakanData->push([
-                        'waktu' => optional($mutation->tanggal)->format('H:i:s') ?? '00:00:00',
-                        'kode_barang' => $mutation->kode_barang,
-                        'nama_barang' => $mutation->nama_barang,
-                        'no_transaksi' => $mutation->no_transaksi,
-                        'no_nota' => $mutation->no_nota,
-                        'supplier_customer' => $mutation->supplier_customer,
-                        'jenis_pergerakan' => 'KELUAR',
-                        'qty_masuk' => 0,
-                        'qty_keluar' => $mutation->minus,
-                        'satuan' => $mutation->satuan,
-                        'keterangan' => $mutation->keterangan,
-                        'created_by' => $mutation->created_by
-                    ]);
-                }
-
-                // Sort by waktu
-                $pergerakanData = $pergerakanData->sortBy('waktu')->values();
-
-                // Summary untuk pergerakan
-                $summary = [
-                    'tanggal' => $tanggalPergerakan,
-                    'total_transaksi' => $pergerakanData->count(),
-                    'total_masuk' => $stokMasuk->count(),
-                    'total_keluar' => $stokKeluar->count(),
-                    'total_qty_masuk' => $stokMasuk->sum('plus'),
-                    'total_qty_keluar' => $stokKeluar->sum('minus'),
-                    'selisih_qty' => $stokMasuk->sum('plus') - $stokKeluar->sum('minus'),
-                    'jenis_barang_terlibat' => $pergerakanData->pluck('kode_barang')->unique()->count()
-                ];
-            } else {
-                // Original stock report logic
-                if ($showBatches) {
-                    $laporanData = $stockBatches->map(function($batch) {
-                        return [
-                            'kode_barang' => $batch->kodeBarang->kode_barang,
-                            'nama_barang' => $batch->kodeBarang->name,
-                            'batch_id' => $batch->id,
-                            'tanggal_masuk' => optional($batch->tanggal_masuk)->format('d/m/Y'),
-                            'qty_masuk' => $batch->qty_masuk,
-                            'qty_sisa' => $batch->qty_sisa,
-                            'harga_beli' => $batch->harga_beli,
-                            'total_nilai_sisa' => $batch->qty_sisa * $batch->harga_beli,
-                            'action_pergerakan' => route('laporan.stok.pergerakan', $batch->kodeBarang->kode_barang),
-                        ];
-                    });
+                if ($showBatches && $kodeBarangModel) {
+                    $batches = StockBatch::where('kode_barang_id', $kodeBarangModel->id)
+                        ->where('qty_sisa', '>', 0)
+                        ->orderBy('tanggal_masuk', 'asc')
+                        ->orderBy('id', 'asc')
+                        ->get();
                 } else {
-                    $groupedByBarang = $stockBatches->groupBy('kode_barang_id');
-                    $laporanData = $groupedByBarang->map(function($batches) {
-                        $first = $batches->first();
-                        $totalQtySisa = $batches->sum('qty_sisa');
-                        $totalNilai = $batches->sum(function($b) { return $b->qty_sisa * $b->harga_beli; });
-                        return [
-                            'kode_barang' => $first->kodeBarang->kode_barang,
-                            'nama_barang' => $first->kodeBarang->name,
-                            'attribute' => $first->kodeBarang->attribute,
-                            'total_qty_sisa' => $totalQtySisa,
-                            'jumlah_batch' => $batches->count(),
-                            'total_nilai_stok' => $totalNilai,
-                            'rata_harga_beli' => $totalQtySisa > 0 ? $totalNilai / $totalQtySisa : 0,
-                            'action_pergerakan' => route('laporan.stok.pergerakan', $first->kodeBarang->kode_barang),
-                        ];
-                    })->values();
+                    // Same stock calculation as Mutasi Stok (aligned to master good_stock)
+                    $ledger = app(StockController::class)->buildMutationLedger(
+                        $selectedStock->kode_barang,
+                        (float) $selectedStock->good_stock,
+                        $tanggal_awal,
+                        $tanggal_akhir
+                    );
+                    $mutations = $ledger['mutations'];
+                    $openingBalance = $ledger['openingBalance'];
                 }
             }
 
-            $summary = [
-                'tanggal' => $tanggalPergerakan,
-                'total_transaksi' => $stockBatches->count(),
-                'total_masuk' => 0,
-                'total_keluar' => 0,
-                'total_qty_masuk' => 0,
-                'total_qty_keluar' => 0,
-                'selisih_qty' => 0,
-                'jenis_barang_terlibat' => 0,
-                'total_jenis_barang' => $showBatches ? $stockBatches->pluck('kode_barang_id')->unique()->count() : $laporanData->count(),
-                'total_batch' => $stockBatches->count(),
-                'grand_total_qty' => $stockBatches->sum('qty_sisa'),
-                'grand_total_nilai' => $stockBatches->sum(function($b){ return $b->qty_sisa * $b->harga_beli; }),
-            ];
-
-            if ($request->wantsJson()) {
-                return response()->json([
-                    'success' => true,
-                    'data' => $laporanData,
-                    'summary' => $summary,
-                    'show_batches' => $showBatches
-                ]);
+            $pageTitle = 'Laporan Stok';
+            if ($showBatches) {
+                $pageTitle = 'Laporan Stok (per Batch)';
+            } elseif ($showPergerakan) {
+                $pageTitle = 'Pergerakan Barang';
             }
 
             return view('laporan.stok', compact(
-                'laporanData', 
-                'summary', 
+                'stocks',
+                'mutations',
+                'batches',
+                'openingBalance',
+                'kolom',
+                'value',
+                'tanggal_awal',
+                'tanggal_akhir',
+                'selectedStock',
+                'grupId',
                 'showBatches',
                 'showPergerakan',
-                'pergerakanData',
-                'tanggalPergerakan',
-                'jenisPergerakan',
-                'kodeBarang',
-                'namaBarang', 
-                'grupBarangId'
+                'pageTitle'
             ));
-
         } catch (\Exception $e) {
             Log::error('Error generating laporan stok:', ['message' => $e->getMessage()]);
             return back()->with('error', 'Terjadi kesalahan: ' . $e->getMessage());
@@ -1361,13 +1276,15 @@ class LaporanController extends Controller
                 return back()->with('error', 'Barang tidak ditemukan');
             }
 
-            // Query untuk stok masuk
-            $stokMasukQuery = StockMutation::where('kode_barang', $kodeBarang)
+            // Query untuk stok masuk (skip canceled transaksi/pembelian)
+            $stokMasukQuery = StockMutation::excludeCanceled()
+                ->where('kode_barang', $kodeBarang)
                 ->whereBetween('tanggal', [$startDate, $endDate])
                 ->where('plus', '>', 0);
 
             // Query untuk stok keluar
-            $stokKeluarQuery = StockMutation::where('kode_barang', $kodeBarang)
+            $stokKeluarQuery = StockMutation::excludeCanceled()
+                ->where('kode_barang', $kodeBarang)
                 ->whereBetween('tanggal', [$startDate, $endDate])
                 ->where('minus', '>', 0);
 
@@ -1388,7 +1305,7 @@ class LaporanController extends Controller
                 try {
                     // Fallback MASUK dari stock_batches
                     $batches = \App\Models\StockBatch::where('kode_barang_id', $barang->id)
-                        ->whereBetween(\DB::raw('DATE(tanggal_masuk)'), [$startDate, $endDate])
+                        ->whereBetween(DB::raw('DATE(tanggal_masuk)'), [$startDate, $endDate])
                         ->orderBy('tanggal_masuk', 'desc')
                         ->get();
                     foreach ($batches as $b) {

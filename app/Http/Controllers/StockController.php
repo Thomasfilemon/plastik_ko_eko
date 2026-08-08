@@ -73,26 +73,14 @@ class StockController extends Controller
         }
 
         if ($selectedStock) {
-            // Build query for mutations with dynamic filters
-            $mutationsQuery = StockMutation::query()
-                ->when($selectedStock?->kode_barang, function($q) use ($selectedStock) {
-                    $q->where('kode_barang', $selectedStock->kode_barang);
-                })
-                ->when($tanggal_awal && $tanggal_akhir, function($q) use ($tanggal_awal, $tanggal_akhir) {
-                    $q->whereBetween(DB::raw('DATE(tanggal)'), [$tanggal_awal, $tanggal_akhir]);
-                }, function($q) use ($tanggal_awal, $tanggal_akhir) {
-                    if ($tanggal_awal) $q->whereDate('tanggal', '>=', $tanggal_awal);
-                    if ($tanggal_akhir) $q->whereDate('tanggal', '<=', $tanggal_akhir);
-                })
-                ->orderBy('tanggal')
-                ->orderBy('id');
-
-            // Opening balance if start date is provided
-            if ($tanggal_awal) {
-                $openingBalance = $this->getOpeningBalance($selectedStock->kode_barang, $tanggal_awal);
-            }
-
-            $mutations = $mutationsQuery->get();
+            $ledger = $this->buildMutationLedger(
+                $selectedStock->kode_barang,
+                (float) $selectedStock->good_stock,
+                $tanggal_awal,
+                $tanggal_akhir
+            );
+            $mutations = $ledger['mutations'];
+            $openingBalance = $ledger['openingBalance'];
         }
 
         return view('stock.mutasi_stock', compact(
@@ -106,6 +94,61 @@ class StockController extends Controller
             'selectedStock',
             'grupId'
         ));
+    }
+
+    /**
+     * Build mutasi ledger the same way for Mutasi Stok & Laporan Stok.
+     * Ending balance always matches master good_stock when viewing through "now".
+     * Canceled penjualan/pembelian movements are omitted so batal does not shift stock.
+     */
+    public function buildMutationLedger(
+        string $kodeBarang,
+        float $goodStock,
+        ?string $tanggalAwal = null,
+        ?string $tanggalAkhir = null
+    ): array {
+        $mutationsQuery = StockMutation::query()
+            ->excludeCanceled()
+            ->where('kode_barang', $kodeBarang)
+            ->when($tanggalAwal && $tanggalAkhir, function ($q) use ($tanggalAwal, $tanggalAkhir) {
+                $q->whereBetween(DB::raw('DATE(tanggal)'), [$tanggalAwal, $tanggalAkhir]);
+            }, function ($q) use ($tanggalAwal, $tanggalAkhir) {
+                if ($tanggalAwal) {
+                    $q->whereDate('tanggal', '>=', $tanggalAwal);
+                }
+                if ($tanggalAkhir) {
+                    $q->whereDate('tanggal', '<=', $tanggalAkhir);
+                }
+            })
+            ->orderBy('tanggal')
+            ->orderBy('id');
+
+        $mutations = $mutationsQuery->get();
+        $net = (float) $mutations->sum(function ($m) {
+            return (float) $m->plus - (float) $m->minus;
+        });
+
+        $viewsThroughNow = !$tanggalAkhir || $tanggalAkhir >= now()->toDateString();
+
+        if ($tanggalAwal && !$viewsThroughNow) {
+            // Historical closed range: saldo awal from prior active movements
+            $openingBalance = $this->getOpeningBalance($kodeBarang, $tanggalAwal);
+        } else {
+            // Align with master / mutasi good stock so Total akhir = Good Stock
+            $openingBalance = $goodStock - $net;
+        }
+
+        $running = $openingBalance;
+        $mutations = $mutations->map(function ($mutation) use (&$running) {
+            $running += (float) $mutation->plus - (float) $mutation->minus;
+            $mutation->total = $running;
+            return $mutation;
+        });
+
+        return [
+            'mutations' => $mutations,
+            'openingBalance' => $openingBalance,
+        ];
     }
 
     /**
@@ -297,13 +340,20 @@ class StockController extends Controller
      */
     public function getOpeningBalance(string $kode_barang, string $date): float
     {
-        $latestMovement = StockMutation::where('kode_barang', $kode_barang)
+        // Sum active (non-canceled) movements before the date so batal does not shift saldo
+        $mutations = StockMutation::where('kode_barang', $kode_barang)
+            ->excludeCanceled()
             ->whereDate('tanggal', '<', $date)
-            ->orderBy('tanggal', 'desc')
-            ->orderBy('id', 'desc')
-            ->first();
+            ->orderBy('tanggal')
+            ->orderBy('id')
+            ->get(['plus', 'minus']);
 
-        return $latestMovement ? $latestMovement->total : 0;
+        $balance = 0.0;
+        foreach ($mutations as $mutation) {
+            $balance += (float) $mutation->plus - (float) $mutation->minus;
+        }
+
+        return $balance;
     }
 
     /**
