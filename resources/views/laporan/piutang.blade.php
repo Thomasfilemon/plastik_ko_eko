@@ -54,6 +54,7 @@
 					<label>Status Piutang</label>
 					<select name="status_piutang" class="form-control">
 						<option value="">-- Semua --</option>
+						<option value="belum_lunas" {{ request('status_piutang') == 'belum_lunas' ? 'selected' : '' }}>Belum Lunas</option>
 						<option value="lunas" {{ request('status_piutang') == 'lunas' ? 'selected' : '' }}>Lunas</option>
 						<option value="sebagian" {{ request('status_piutang') == 'sebagian' ? 'selected' : '' }}>Sebagian</option>
 						<option value="belum_dibayar" {{ request('status_piutang') == 'belum_dibayar' ? 'selected' : '' }}>Belum Dibayar</option>
@@ -165,6 +166,16 @@
 				</tbody>
 			</table>
 		</div>
+
+		@if($laporanData instanceof \Illuminate\Pagination\AbstractPaginator)
+		<div class="d-flex justify-content-between align-items-center mt-3 flex-wrap">
+			<small class="text-muted mb-2">
+				Menampilkan {{ $laporanData->firstItem() ?? 0 }}–{{ $laporanData->lastItem() ?? 0 }}
+				dari {{ number_format($laporanData->total()) }} faktur
+			</small>
+			<div>{{ $laporanData->links() }}</div>
+		</div>
+		@endif
 	</div>
 </div>
 @endsection

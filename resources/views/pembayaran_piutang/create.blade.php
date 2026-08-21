@@ -113,7 +113,7 @@
                     const tr = document.createElement('tr');
                     tr.dataset.id = inv.id;
                     tr.innerHTML = `
-                        <td><input type="checkbox" class="chk-include" checked></td>
+                        <td><input type="checkbox" class="chk-include"></td>
                         <td>${inv.no_transaksi}</td>
                         <td>${inv.tanggal}</td>
                         <td class="text-right">${formatNumber(inv.total_faktur)}</td>
@@ -141,7 +141,10 @@
                 document.querySelectorAll('#tabelFaktur tbody tr').forEach(tr=>{
                     const id = tr.dataset.id;
                     const inp = tr.querySelector('.input-bayar');
-                    if(inp) inp.value = map.get(id) || 0;
+                    const chk = tr.querySelector('.chk-include');
+                    const val = map.get(id) || 0;
+                    if(inp) inp.value = val;
+                    if(chk) chk.checked = val > 0;
                 });
             })
             .catch(()=>alert('Gagal mengambil sugesti'));
@@ -214,7 +217,24 @@
     if(btnSugg) btnSugg.addEventListener('click', suggestAlloc);
     if(btnKlikLunas) btnKlikLunas.addEventListener('click', klikLunas);
     const form = document.getElementById('pembayaranForm');
-    if(form) form.addEventListener('submit', function(e){ buildPaymentDetails(e); });
+    if(form) form.addEventListener('submit', function(e){
+        buildPaymentDetails(e);
+        if(!e.defaultPrevented){
+            const btn = form.querySelector('button[type=submit]');
+            if(btn){ btn.disabled = true; btn.textContent = 'Menyimpan...'; }
+        }
+    });
+
+    // Typing a payment amount selects that invoice; clearing unselects
+    const tabelFaktur = document.querySelector('#tabelFaktur');
+    if (tabelFaktur) {
+        tabelFaktur.addEventListener('input', function(e){
+            if(!e.target.classList.contains('input-bayar')) return;
+            const tr = e.target.closest('tr');
+            const chk = tr && tr.querySelector('.chk-include');
+            if(chk) chk.checked = parseFloat(e.target.value || 0) > 0;
+        });
+    }
 })();
 </script>
 @endsection

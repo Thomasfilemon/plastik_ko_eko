@@ -779,6 +779,7 @@ class LaporanController extends Controller
         $statusPiutang = $request->get('status_piutang');
         $statusKeterlambatan = $request->get('status_keterlambatan');
         $showJatuhTempo = (bool) $request->get('show_jatuh_tempo', false);
+        $perPage = max(10, min(100, (int) $request->get('per_page', 25)));
 
         try {
             $query = Transaksi::with(['customer', 'pembayaranDetails'])
@@ -789,7 +790,15 @@ class LaporanController extends Controller
                 $query->where('kode_customer', $customerId);
             }
 
-            if ($statusPiutang) {
+            // Pre-filter at DB where possible
+            if ($statusPiutang === 'belum_lunas') {
+                $query->where('sisa_piutang', '>', 0);
+            } elseif ($statusPiutang === 'lunas') {
+                $query->where(function ($q) {
+                    $q->where('status_piutang', 'lunas')
+                        ->orWhere('sisa_piutang', '<=', 0);
+                });
+            } elseif (in_array($statusPiutang, ['sebagian', 'belum_dibayar'], true)) {
                 $query->where('status_piutang', $statusPiutang);
             }
 
@@ -881,6 +890,13 @@ class LaporanController extends Controller
                 ];
             });
 
+            // Refine status_piutang using computed display status (after retur)
+            if ($statusPiutang === 'belum_lunas') {
+                $laporanData = $laporanData->filter(fn ($row) => ($row['sisa_piutang'] ?? 0) > 0);
+            } elseif (in_array($statusPiutang, ['lunas', 'sebagian', 'belum_dibayar'], true)) {
+                $laporanData = $laporanData->filter(fn ($row) => ($row['status_piutang'] ?? '') === $statusPiutang);
+            }
+
             // Filter berdasarkan status keterlambatan
             if ($statusKeterlambatan) {
                 $laporanData = $laporanData->filter(function($row) use ($statusKeterlambatan) {
@@ -900,6 +916,8 @@ class LaporanController extends Controller
                     }
                 });
             }
+
+            $laporanData = $laporanData->values();
 
             $groupByCustomer = $laporanData->groupBy('kode_customer')->map(function($rows, $kode) {
                 $first = $rows->first();
@@ -926,16 +944,45 @@ class LaporanController extends Controller
                 'sisa_piutang_jatuh_tempo' => $laporanData->where('is_jatuh_tempo', true)->sum('sisa_piutang'),
             ];
 
+            $page = max(1, (int) $request->get('page', 1));
+            $totalRows = $laporanData->count();
+            $laporanPage = $laporanData->forPage($page, $perPage)->values();
+            $laporanData = new \Illuminate\Pagination\LengthAwarePaginator(
+                $laporanPage,
+                $totalRows,
+                $perPage,
+                $page,
+                [
+                    'path' => $request->url(),
+                    'query' => $request->query(),
+                ]
+            );
+
             if ($request->wantsJson()) {
                 return response()->json([
                     'success' => true,
-                    'data' => $laporanData,
+                    'data' => $laporanPage,
                     'group_by_customer' => $groupByCustomer,
-                    'summary' => $summary
+                    'summary' => $summary,
+                    'pagination' => [
+                        'current_page' => $laporanData->currentPage(),
+                        'per_page' => $laporanData->perPage(),
+                        'total' => $laporanData->total(),
+                        'last_page' => $laporanData->lastPage(),
+                    ],
                 ]);
             }
             // dd($transaksi);
-            return view('laporan.piutang', compact('startDate', 'endDate', 'laporanData', 'groupByCustomer', 'summary', 'custList'));
+            return view('laporan.piutang', compact(
+                'startDate',
+                'endDate',
+                'laporanData',
+                'groupByCustomer',
+                'summary',
+                'custList',
+                'statusPiutang',
+                'perPage'
+            ));
 
         } catch (\Exception $e) {
             Log::error('Error generating laporan piutang:', ['message' => $e->getMessage()]);

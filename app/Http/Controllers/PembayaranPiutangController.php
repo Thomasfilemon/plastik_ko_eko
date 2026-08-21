@@ -413,7 +413,7 @@ class PembayaranPiutangController extends Controller
             }
 
             return redirect()
-                ->route('pembayaran-piutang.show', $pembayaran->id)
+                ->route('pembayaran-piutang.index')
                 ->with('success', 'Pembayaran berhasil disimpan.');
 
         } catch (\Exception $e) {
@@ -610,7 +610,7 @@ class PembayaranPiutangController extends Controller
             }
 
             return redirect()
-                ->route('pembayaran-piutang.show', $pembayaran->id)
+                ->route('pembayaran-piutang.index')
                 ->with('success', 'Pembayaran berhasil diupdate.');
 
         } catch (\Exception $e) {

@@ -11,6 +11,12 @@
 		@endcan
 	</div>
 	<div class="card-body">
+		@if(session('success'))
+			<div class="alert alert-success">{{ session('success') }}</div>
+		@endif
+		@if(session('error'))
+			<div class="alert alert-danger">{{ session('error') }}</div>
+		@endif
 		@if(isset($summary))
 			<div class="mb-3">
 				<strong>Pembayaran Hari Ini:</strong> Rp {{ number_format($summary['total_pembayaran_hari_ini'] ?? 0, 0, ',', '.') }} |
