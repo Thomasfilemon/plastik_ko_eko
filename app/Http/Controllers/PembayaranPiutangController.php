@@ -102,13 +102,18 @@ class PembayaranPiutangController extends Controller
                     ->keyBy('transaksi_id');
             }
 
-            // Get unpaid invoices, plus invoices already in the payment being edited
+            // Get unpaid invoices (exclude canceled), plus invoices already in the payment being edited
             $invoices = Transaksi::where('kode_customer', $customer->kode_customer)
                 ->where(function ($q) use ($excludePembayaranId) {
-                    $q->whereIn('status_piutang', ['belum_dibayar', 'sebagian']);
+                    $q->where(function ($q2) {
+                        $q2->outstandingPiutang();
+                    });
                     if ($excludePembayaranId) {
-                        $q->orWhereHas('pembayaranDetails', function ($d) use ($excludePembayaranId) {
-                            $d->where('pembayaran_id', $excludePembayaranId);
+                        $q->orWhere(function ($q2) use ($excludePembayaranId) {
+                            $q2->notCanceled()
+                                ->whereHas('pembayaranDetails', function ($d) use ($excludePembayaranId) {
+                                    $d->where('pembayaran_id', $excludePembayaranId);
+                                });
                         });
                     }
                 })
@@ -148,7 +153,16 @@ class PembayaranPiutangController extends Controller
                         'suggested_payment' => $dilunasiByThis > 0 ? $dilunasiByThis : $sisaPiutangSetelahRetur,
                         'jumlah_dilunasi_saat_ini' => $dilunasiByThis,
                     ];
-                });
+                })
+                // Never offer zero-balance / canceled leftovers after retur recalculation
+                ->filter(function ($invoice) use ($excludePembayaranId, $amountsByTransaksi) {
+                    if (($invoice['sisa_tagihan'] ?? 0) > 0) {
+                        return true;
+                    }
+                    // Keep rows that belong to the payment being edited even if sisa is 0 after adjustments
+                    return $excludePembayaranId && $amountsByTransaksi->has($invoice['id']);
+                })
+                ->values();
 
             // Get nota kredit dari retur penjualan yang belum digunakan
             $notaKredit = \App\Models\NotaKredit::where('kode_customer', $customer->kode_customer)
@@ -212,9 +226,9 @@ class PembayaranPiutangController extends Controller
             $customerId = $request->customer_id;
             $totalBayar = $request->total_bayar;
 
-            // Get unpaid invoices ordered by date (FIFO)
+            // Get unpaid invoices ordered by date (FIFO) — skip canceled
             $invoices = Transaksi::where('kode_customer', Customer::find($customerId)->kode_customer)
-                ->whereIn('status_piutang', ['belum_dibayar', 'sebagian'])
+                ->outstandingPiutang()
                 ->orderBy('tanggal', 'asc')
                 ->get();
 
@@ -294,9 +308,9 @@ class PembayaranPiutangController extends Controller
         try {
             $customer = Customer::find($request->customer_id);
             
-            // Calculate total piutang before payment
+            // Calculate total piutang before payment (exclude canceled)
             $totalPiutang = Transaksi::where('kode_customer', $customer->kode_customer)
-                ->whereIn('status_piutang', ['belum_dibayar', 'sebagian'])
+                ->outstandingPiutang()
                 ->sum('sisa_piutang');
 
             // Create pembayaran record
@@ -320,6 +334,10 @@ class PembayaranPiutangController extends Controller
             // Create payment details
             foreach ($request->payment_details as $detail) {
                 $transaksi = Transaksi::find($detail['transaksi_id']);
+                if (!$transaksi || str_contains((string) $transaksi->status, 'canceled')) {
+                    throw new \Exception('Tidak dapat membayar faktur yang sudah dibatalkan' .
+                        ($transaksi ? " ({$transaksi->no_transaksi})" : ''));
+                }
                 $sudahDibayar = $transaksi->total_dibayar ?? 0;
                 $jumlahDilunasi = $detail['jumlah_dilunasi'];
                 
@@ -533,6 +551,10 @@ class PembayaranPiutangController extends Controller
             // Create new payment details
             foreach ($request->payment_details as $detail) {
                 $transaksi = Transaksi::find($detail['transaksi_id']);
+                if (!$transaksi || str_contains((string) $transaksi->status, 'canceled')) {
+                    throw new \Exception('Tidak dapat membayar faktur yang sudah dibatalkan' .
+                        ($transaksi ? " ({$transaksi->no_transaksi})" : ''));
+                }
                 $sudahDibayar = $transaksi->total_dibayar ?? 0;
                 $jumlahDilunasi = $detail['jumlah_dilunasi'];
                 $sisaTagihan = max(0, ($transaksi->grand_total - $sudahDibayar - $jumlahDilunasi));
@@ -577,9 +599,9 @@ class PembayaranPiutangController extends Controller
                 }
             }
 
-            // Refresh header piutang snapshot
+            // Refresh header piutang snapshot (exclude canceled)
             $totalPiutangCustomer = Transaksi::where('kode_customer', $customer->kode_customer)
-                ->whereIn('status_piutang', ['belum_dibayar', 'sebagian'])
+                ->outstandingPiutang()
                 ->sum('sisa_piutang');
 
             $pembayaran->update([
@@ -764,6 +786,7 @@ class PembayaranPiutangController extends Controller
         $statusPiutang = $request->get('status_piutang');
     
         $query = Transaksi::with(['customer'])
+            ->notCanceled()
             ->byDateRange($startDate, $endDate);
     
         // Filter berdasarkan kode_customer

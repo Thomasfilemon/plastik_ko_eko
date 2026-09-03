@@ -156,6 +156,42 @@ class PanelController extends Controller
         return view('master.barang', compact('inventory', 'search', 'searchBy', 'statusFilter'));
     }
 
+    /**
+     * Grand total nilai stok (semua barang). Admin Bos only.
+     */
+    public function totalNilaiStok()
+    {
+        if (auth()->user()->role !== 'admin') {
+            abort(403, 'Access denied. Admins only.');
+        }
+
+        $stockSub = DB::table('stocks')
+            ->select('kode_barang', DB::raw('SUM(good_stock) as qty'))
+            ->groupBy('kode_barang');
+
+        $row = DB::table('kode_barangs as kb')
+            ->leftJoinSub($stockSub, 's', function ($join) {
+                $join->on('s.kode_barang', '=', 'kb.kode_barang');
+            })
+            ->selectRaw('
+                COALESCE(SUM(COALESCE(s.qty, 0) * COALESCE(kb.cost, 0)), 0) as total_nilai_beli,
+                COALESCE(SUM(COALESCE(s.qty, 0) * COALESCE(kb.harga_jual, 0)), 0) as total_nilai_jual,
+                COALESCE(SUM(COALESCE(s.qty, 0)), 0) as total_qty,
+                COUNT(kb.id) as total_sku,
+                SUM(CASE WHEN COALESCE(s.qty, 0) > 0 THEN 1 ELSE 0 END) as sku_berstok
+            ')
+            ->first();
+
+        return response()->json([
+            'success' => true,
+            'total_nilai_beli' => (float) ($row->total_nilai_beli ?? 0),
+            'total_nilai_jual' => (float) ($row->total_nilai_jual ?? 0),
+            'total_qty' => (float) ($row->total_qty ?? 0),
+            'total_sku' => (int) ($row->total_sku ?? 0),
+            'sku_berstok' => (int) ($row->sku_berstok ?? 0),
+        ]);
+    }
+
 
     /**
      * Display the repack/potong view with cutting history

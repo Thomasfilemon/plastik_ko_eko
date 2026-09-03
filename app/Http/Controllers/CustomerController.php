@@ -54,7 +54,7 @@ class CustomerController extends Controller
         $customers->getCollection()->transform(function ($customer) {
             // Hitung total piutang dari transaksi
             $totalPiutang = \App\Models\Transaksi::where('kode_customer', $customer->kode_customer)
-                ->whereIn('status_piutang', ['belum_dibayar', 'sebagian'])
+                ->outstandingPiutang()
                 ->sum('sisa_piutang');
             
             $customer->sisa_piutang = $totalPiutang;

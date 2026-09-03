@@ -27,7 +27,7 @@ class PembayaranPiutangService
         }
 
         $transaksi = Transaksi::where('kode_customer', $customer->kode_customer)
-            ->whereIn('status_piutang', ['belum_dibayar', 'sebagian'])
+            ->outstandingPiutang()
             ->get();
 
         $totalPiutang = $transaksi->sum('sisa_piutang');
@@ -59,9 +59,9 @@ class PembayaranPiutangService
     public function getFifoPaymentSuggestion(int $customerId, float $totalBayar): array
     {
         try {
-            // Get unpaid invoices ordered by date (FIFO)
+            // Get unpaid invoices ordered by date (FIFO) — skip canceled
             $invoices = Transaksi::where('kode_customer', Customer::find($customerId)->kode_customer)
-                ->whereIn('status_piutang', ['belum_dibayar', 'sebagian'])
+                ->outstandingPiutang()
                 ->orderBy('tanggal', 'asc') // Oldest first
                 ->get();
 
@@ -120,9 +120,9 @@ class PembayaranPiutangService
         try {
             $customer = Customer::find($paymentData['customer_id']);
             
-            // Calculate total piutang before payment
+            // Calculate total piutang before payment (exclude canceled)
             $totalPiutang = Transaksi::where('kode_customer', $customer->kode_customer)
-                ->whereIn('status_piutang', ['belum_dibayar', 'sebagian'])
+                ->outstandingPiutang()
                 ->sum('sisa_piutang');
 
             // Create pembayaran record
@@ -230,7 +230,7 @@ class PembayaranPiutangService
     public function getLaporanPiutang(array $filters = []): array
     {
         try {
-            $query = Transaksi::with(['customer']);
+            $query = Transaksi::with(['customer'])->notCanceled();
 
             // Apply filters
             if (isset($filters['start_date']) && isset($filters['end_date'])) {

@@ -177,12 +177,38 @@ class Transaksi extends Model
 
     public function scopeBelumDibayar($query)
     {
-        return $query->where('status_piutang', 'belum_dibayar');
+        return $query->where('status_piutang', 'belum_dibayar')
+            ->where(function ($q) {
+                $q->whereNull('status')->orWhere('status', 'not like', '%canceled%');
+            });
     }
 
     public function scopeJatuhTempo($query)
     {
-        return $query->where('tanggal_jatuh_tempo', '<', now());
+        return $query->where('tanggal_jatuh_tempo', '<', now())
+            ->where(function ($q) {
+                $q->whereNull('status')->orWhere('status', 'not like', '%canceled%');
+            });
+    }
+
+    /**
+     * Active (not canceled) invoices that still have outstanding piutang.
+     */
+    public function scopeOutstandingPiutang($query)
+    {
+        return $query
+            ->where(function ($q) {
+                $q->whereNull('status')->orWhere('status', 'not like', '%canceled%');
+            })
+            ->whereIn('status_piutang', ['belum_dibayar', 'sebagian'])
+            ->where('sisa_piutang', '>', 0);
+    }
+
+    public function scopeNotCanceled($query)
+    {
+        return $query->where(function ($q) {
+            $q->whereNull('status')->orWhere('status', 'not like', '%canceled%');
+        });
     }
 
     public function scopeByCustomer($query, $customerId)

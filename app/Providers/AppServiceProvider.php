@@ -40,5 +40,10 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('view-total-harga', function ($user) {
             return $user->can('view total harga');
         });
+
+        // Grand total nilai stok popup — Admin Bos only
+        Gate::define('view-nilai-stok', function ($user) {
+            return $user->role === 'admin';
+        });
     }
 }

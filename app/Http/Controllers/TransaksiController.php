@@ -877,9 +877,8 @@ class TransaksiController extends Controller
             // Nolkan piutang pada transaksi yang dibatalkan
             $transaksi->total_dibayar = 0;
             $transaksi->sisa_piutang = 0;
-            // Gunakan nilai enum yang valid untuk kolom status_piutang
-            // Opsi valid: 'lunas', 'sebagian', 'belum_dibayar'
-            $transaksi->status_piutang = 'belum_dibayar';
+            // Lunas / no outstanding — canceled notas must not appear in pembayaran piutang
+            $transaksi->status_piutang = 'lunas';
 
             // Handle Kas adjustment for cash transactions
             if ($this->isCashPayment($transaksi->cara_bayar)) {
@@ -902,6 +901,13 @@ class TransaksiController extends Controller
             $transaksi->canceled_at = now(); // This is crucial for customer data updates
             $transaksi->cancel_reason = $request->cancel_reason;
             $transaksi->save();
+
+            // Refresh customer outstanding piutang (exclude canceled)
+            $totalPiutang = Transaksi::where('kode_customer', $transaksi->kode_customer)
+                ->outstandingPiutang()
+                ->sum('sisa_piutang');
+            Customer::where('kode_customer', $transaksi->kode_customer)
+                ->update(['total_piutang' => $totalPiutang]);
 
             DB::commit();
 

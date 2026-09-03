@@ -4,6 +4,11 @@
 <section id="barang">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2>Master Barang</h2>
+        @can('view-nilai-stok')
+        <button type="button" class="btn btn-dark" id="btnNilaiStok">
+            <i class="fas fa-coins mr-1"></i> Total Nilai Stok
+        </button>
+        @endcan
     </div>
 
     <div class="card">
@@ -182,6 +187,30 @@
     </div>
 </section>
 
+@can('view-nilai-stok')
+<div class="modal fade" id="nilaiStokModal" tabindex="-1" role="dialog" aria-labelledby="nilaiStokModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="nilaiStokModalLabel">Total Nilai Stok</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body" id="nilaiStokModalBody">
+                <div class="text-center text-muted py-3">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <div class="mt-2">Menghitung...</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Tutup</button>
+            </div>
+        </div>
+    </div>
+</div>
+@endcan
+
 <!-- Edit Barang Modal (inline, no page navigation) -->
 <div class="modal fade" id="editBarangModal" tabindex="-1" role="dialog" aria-labelledby="editBarangModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg" role="document">
@@ -267,6 +296,52 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Tambahkan event listener untuk dropdown
     searchBySelect.addEventListener('change', updateSearchInputState);
+
+    @can('view-nilai-stok')
+    const btnNilaiStok = document.getElementById('btnNilaiStok');
+    if (btnNilaiStok) {
+        const loadingHtml = '<div class="text-center text-muted py-3"><div class="spinner-border text-primary" role="status"></div><div class="mt-2">Menghitung...</div></div>';
+        const formatRp = (n) => 'Rp. ' + Number(n || 0).toLocaleString('id-ID', { maximumFractionDigits: 0 });
+        const formatQty = (n) => Number(n || 0).toLocaleString('id-ID', { maximumFractionDigits: 2 });
+
+        btnNilaiStok.addEventListener('click', function () {
+            const body = document.getElementById('nilaiStokModalBody');
+            body.innerHTML = loadingHtml;
+            $('#nilaiStokModal').modal('show');
+
+            fetch('{{ route('master.barang.total-nilai-stok') }}', {
+                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+            })
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(data => {
+                body.innerHTML = `
+                    <p class="text-muted small mb-3">Nilai seluruh stok (semua barang, bukan halaman ini saja).</p>
+                    <table class="table table-sm table-bordered mb-0">
+                        <tr>
+                            <th>Nilai Modal (Harga Beli)</th>
+                            <td class="text-right"><strong>${formatRp(data.total_nilai_beli)}</strong></td>
+                        </tr>
+                        <tr>
+                            <th>Nilai Jual</th>
+                            <td class="text-right"><strong>${formatRp(data.total_nilai_jual)}</strong></td>
+                        </tr>
+                        <tr>
+                            <th>Total Quantity</th>
+                            <td class="text-right">${formatQty(data.total_qty)}</td>
+                        </tr>
+                        <tr>
+                            <th>Barang dengan Stok</th>
+                            <td class="text-right">${data.sku_berstok} / ${data.total_sku} SKU</td>
+                        </tr>
+                    </table>
+                `;
+            })
+            .catch(() => {
+                body.innerHTML = '<div class="alert alert-danger mb-0">Gagal menghitung total nilai stok.</div>';
+            });
+        });
+    }
+    @endcan
 });
 </script>
 

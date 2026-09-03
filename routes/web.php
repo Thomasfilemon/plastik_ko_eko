@@ -109,6 +109,9 @@ Route::middleware(['web', 'auth'])->group(function () {
     // Master Barang routes
     Route::group(['middleware' => ['permission:view master data'], 'prefix' => 'master'], function () {
         Route::get('/barang', [PanelController::class, 'viewBarang'])->name('master.barang');
+        Route::get('/barang/total-nilai-stok', [PanelController::class, 'totalNilaiStok'])
+            ->middleware('role')
+            ->name('master.barang.total-nilai-stok');
         
         // Mutasi Stok Barang
         Route::get('/mutasistokbarang', function () {
