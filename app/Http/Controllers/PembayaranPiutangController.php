@@ -780,14 +780,22 @@ class PembayaranPiutangController extends Controller
      */
     public function laporanPiutang(Request $request)
     {
-        $startDate = $request->get('start_date', now()->startOfMonth());
-        $endDate = $request->get('end_date', now()->endOfMonth());
+        $allDates = $request->boolean('all_dates');
+        $startDate = \Illuminate\Support\Carbon::parse($request->get('start_date', now()->startOfMonth()->toDateString()))->startOfDay();
+        $endDate = \Illuminate\Support\Carbon::parse($request->get('end_date', now()->endOfMonth()->toDateString()))->endOfDay();
         $kodeCustomer = $request->get('kode_customer');
         $statusPiutang = $request->get('status_piutang');
+        $sortBy = in_array($request->get('sort_by'), ['tanggal', 'tanggal_jatuh_tempo'], true)
+            ? $request->get('sort_by')
+            : 'tanggal';
+        $sortDir = strtolower($request->get('sort_dir', 'desc')) === 'asc' ? 'asc' : 'desc';
     
         $query = Transaksi::with(['customer'])
-            ->notCanceled()
-            ->byDateRange($startDate, $endDate);
+            ->notCanceled();
+
+        if (!$allDates) {
+            $query->byDateRange($startDate, $endDate);
+        }
     
         // Filter berdasarkan kode_customer
         if ($kodeCustomer) {
@@ -798,8 +806,11 @@ class PembayaranPiutangController extends Controller
         if ($statusPiutang) {
             $query->where('status_piutang', $statusPiutang);
         }
-    
-        $transaksi = $query->orderBy('tanggal', 'desc')->get();
+
+        $secondarySort = $sortBy === 'tanggal' ? 'tanggal_jatuh_tempo' : 'tanggal';
+        $transaksi = $query->orderBy($sortBy, $sortDir)
+            ->orderBy($secondarySort, $sortDir)
+            ->get();
     
         $summary = [
             'total_faktur' => $transaksi->count(),
@@ -816,7 +827,7 @@ class PembayaranPiutangController extends Controller
         $customers = \App\Models\Customer::all();
     
         return view('pembayaran_piutang.laporan', compact(
-            'transaksi', 'summary', 'startDate', 'endDate', 'customers', 'kodeCustomer', 'statusPiutang'
+            'transaksi', 'summary', 'startDate', 'endDate', 'allDates', 'sortBy', 'sortDir', 'customers', 'kodeCustomer', 'statusPiutang'
         ));
     }
 

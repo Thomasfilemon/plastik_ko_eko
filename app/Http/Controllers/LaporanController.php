@@ -773,18 +773,26 @@ class LaporanController extends Controller
      */
     public function laporanPiutang(Request $request)
     {
-        $startDate = $request->get('start_date', now()->startOfMonth());
-        $endDate = $request->get('end_date', now()->endOfMonth());
+        $allDates = $request->boolean('all_dates');
+        $startDate = \Illuminate\Support\Carbon::parse($request->get('start_date', now()->startOfMonth()->toDateString()))->startOfDay();
+        $endDate = \Illuminate\Support\Carbon::parse($request->get('end_date', now()->endOfMonth()->toDateString()))->endOfDay();
         $customerId = $request->get('customer_id');
         $statusPiutang = $request->get('status_piutang');
         $statusKeterlambatan = $request->get('status_keterlambatan');
         $showJatuhTempo = (bool) $request->get('show_jatuh_tempo', false);
+        $sortBy = in_array($request->get('sort_by'), ['tanggal', 'tanggal_jatuh_tempo'], true)
+            ? $request->get('sort_by')
+            : 'tanggal_jatuh_tempo';
+        $sortDir = strtolower($request->get('sort_dir', 'asc')) === 'desc' ? 'desc' : 'asc';
         $perPage = max(10, min(100, (int) $request->get('per_page', 25)));
 
         try {
             $query = Transaksi::with(['customer', 'pembayaranDetails'])
-                ->where('status', '!=', 'canceled')
-                ->whereBetween('tanggal', [$startDate, $endDate]);
+                ->where('status', '!=', 'canceled');
+
+            if (!$allDates) {
+                $query->whereBetween('tanggal', [$startDate, $endDate]);
+            }
 
             if ($customerId) {
                 $query->where('kode_customer', $customerId);
@@ -808,8 +816,9 @@ class LaporanController extends Controller
 
             $custList = Customer::orderBy('nama')->get();
 
-            $transaksi = $query->orderBy('tanggal_jatuh_tempo', 'asc')
-                ->orderBy('tanggal', 'asc')
+            $secondarySort = $sortBy === 'tanggal' ? 'tanggal_jatuh_tempo' : 'tanggal';
+            $transaksi = $query->orderBy($sortBy, $sortDir)
+                ->orderBy($secondarySort, $sortDir)
                 ->get();
             // dd($transaksi);
             $laporanData = $transaksi->map(function($t) {
@@ -976,6 +985,9 @@ class LaporanController extends Controller
             return view('laporan.piutang', compact(
                 'startDate',
                 'endDate',
+                'allDates',
+                'sortBy',
+                'sortDir',
                 'laporanData',
                 'groupByCustomer',
                 'summary',
