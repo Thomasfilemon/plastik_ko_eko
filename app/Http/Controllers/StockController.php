@@ -26,22 +26,27 @@ class StockController extends Controller
         $grupId = $request->input('grup_barang');
         $selectedKodeBarang = $request->input('selected_kode_barang');
 
-        // Get all available stocks, but GROUP BY kode_barang to avoid duplicates
-        $stocksQuery = Stock::select(
-            'stocks.kode_barang',
-            'stocks.nama_barang',
-            DB::raw('SUM(stocks.good_stock) as good_stock'), // Sum up the stocks
-            DB::raw('SUM(stocks.bad_stock) as bad_stock'),   // Sum up bad stocks
-            'stocks.satuan'
-        )
-        ->groupBy('stocks.kode_barang', 'stocks.nama_barang', 'stocks.satuan'); // Group by everything except SO
+        // Prefer current master barang name so renames show immediately in Mutasi Stok
+        $stocksQuery = Stock::query()
+            ->leftJoin('kode_barangs', 'stocks.kode_barang', '=', 'kode_barangs.kode_barang')
+            ->select(
+                'stocks.kode_barang',
+                DB::raw('COALESCE(kode_barangs.name, stocks.nama_barang) as nama_barang'),
+                DB::raw('SUM(stocks.good_stock) as good_stock'),
+                DB::raw('SUM(stocks.bad_stock) as bad_stock'),
+                'stocks.satuan'
+            )
+            ->groupBy('stocks.kode_barang', 'kode_barangs.name', 'stocks.nama_barang', 'stocks.satuan');
 
         // Apply filters using when() for dynamic query building
         $stocksQuery->when($value, function($query, $value) use ($kolom) {
             if ($kolom === 'kode_barang') {
                 return $query->where('stocks.kode_barang', 'like', "%{$value}%");
             } elseif ($kolom === 'nama') {
-                return $query->where('stocks.nama_barang', 'like', "%{$value}%");
+                return $query->where(function ($q) use ($value) {
+                    $q->where('stocks.nama_barang', 'like', "%{$value}%")
+                        ->orWhere('kode_barangs.name', 'like', "%{$value}%");
+                });
             }
         });
 

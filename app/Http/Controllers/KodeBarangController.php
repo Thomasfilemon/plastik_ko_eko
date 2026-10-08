@@ -232,6 +232,11 @@ class KodeBarangController extends Controller
             $stock->save();
         }
 
+        \App\Models\StockMutation::where('kode_barang', $oldKodeBarang)->update([
+            'nama_barang' => $validated['name'],
+            'kode_barang' => $newKode,
+        ]);
+
         return redirect()->route('code.view-code')
             ->with('success', "Successfully updated code!");
     }

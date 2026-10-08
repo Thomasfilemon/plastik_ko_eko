@@ -448,6 +448,10 @@ class PanelController extends Controller
         $kode->status = $status;
         $kode->save();
 
+        // Keep Mutasi Stok / stock list names in sync with master barang
+        Stock::where('kode_barang', $group_id)->update(['nama_barang' => $name]);
+        \App\Models\StockMutation::where('kode_barang', $group_id)->update(['nama_barang' => $name]);
+
         // $parts = explode('-', $group_id);
         // $group_id = $parts[0];
 
