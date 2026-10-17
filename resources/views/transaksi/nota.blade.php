@@ -72,7 +72,7 @@ use Riskihajar\Terbilang\Facades\Terbilang;
         .summary-table th, .summary-table td { border: 1px solid #000; padding: 1mm 1.5mm; }
         .summary-table th { text-align: left; font-weight: bold !important; }
         .notes-details-wrapper { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: nowrap; width: 100%; margin-top: 1mm; }
-        .notes-section { flex: 1 1 0%; min-width: 45%; padding-right: 2mm; font-size: 8.5pt; line-height: 1.25; }
+        .notes-section { flex: 1 1 0%; min-width: 45%; padding-right: 2mm; font-size: 10.5pt; line-height: 1.2; }
         .details-row { flex: 0 1 auto; min-width: 40%; display: flex; flex-direction: column; font-size: 8.5pt; text-align: right; padding-left: 2mm; }
         .payment-info { margin-bottom: 1mm; }
         .terbilang-section { font-style: normal; }
@@ -81,7 +81,7 @@ use Riskihajar\Terbilang\Facades\Terbilang;
             display: flex;
             justify-content: flex-end;
             gap: 8%;
-            margin-top: 3mm;
+            margin-top: 2mm;
             font-size: 9pt;
             padding-top: 0;
             line-height: 1.2;
@@ -114,7 +114,7 @@ use Riskihajar\Terbilang\Facades\Terbilang;
 <body>
 
 @php
-    $defaultCompany = \App\Models\Perusahaan::where('is_default', true)->first() ?? new \App\Models\Perusahaan();
+    $defaultCompany = \App\Models\Perusahaan::forNota();
     $itemsPerPage = 5; // larger rows to fill half-letter LX-310 form
     $groupedItems = $transaction->items->chunk($itemsPerPage);
     $totalPages = $groupedItems->count();
@@ -153,10 +153,6 @@ use Riskihajar\Terbilang\Facades\Terbilang;
         <table style="width: 100%; table-layout: fixed; margin-bottom: 2px; font-size: 9pt;">
             <tr>
                 <td style="width: 50%; vertical-align: top;">
-                    <strong>Kepada Yth: {{ $transaction->customer->nama ?? '-' }}</strong><br>
-                    {{ $transaction->customer->alamat ?? '-' }}
-                </td>
-                <td style="width: 50%; vertical-align: top;">
                     <table style="width: 100%; font-size: 9pt;">
                         <tr>
                             <td style="width: 30%;"><strong>Faktur:</strong></td>
@@ -175,6 +171,10 @@ use Riskihajar\Terbilang\Facades\Terbilang;
                             <td>{{ $transaction->cara_bayar ?? 'Tunai' }}</td>
                         </tr>
                     </table>
+                </td>
+                <td style="width: 50%; vertical-align: top;">
+                    <strong>Kepada Yth: {{ $transaction->customer->nama ?? '-' }}</strong><br>
+                    {{ $transaction->customer->alamat ?? '-' }}
                 </td>
             </tr>
         </table>

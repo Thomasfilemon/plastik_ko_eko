@@ -133,7 +133,7 @@ use Riskihajar\Terbilang\Facades\Terbilang;
 <body>
 
 @php
-    $defaultCompany = \App\Models\Perusahaan::where('is_default', true)->first() ?? new \App\Models\Perusahaan();
+    $defaultCompany = \App\Models\Perusahaan::forNota();
     $itemsPerPage = 10;
     $groupedItems = $transaction->items->chunk($itemsPerPage);
     $totalPages = $groupedItems->count();
@@ -167,10 +167,6 @@ use Riskihajar\Terbilang\Facades\Terbilang;
         <table class="customer-info">
             <tr>
                 <td style="width:50%;">
-                    <strong>Kepada Yth: {{ $transaction->customer->nama ?? '-' }}</strong><br>
-                    {{ $transaction->customer->alamat ?? '-' }}
-                </td>
-                <td style="width:50%;">
                     <table style="width:100%; font-size:8pt;">
                         <tr><td><strong>Faktur:</strong></td><td>{{ $transaction->no_transaksi }}</td></tr>
                         <tr><td><strong>Salesman:</strong></td><td>{{ $transaction->salesman->keterangan ?? 'OFFICE' }}</td></tr>
@@ -183,6 +179,10 @@ use Riskihajar\Terbilang\Facades\Terbilang;
                         <tr><td><strong>Hari Tempo:</strong></td><td>{{ $transaction->hari_tempo }} hari</td></tr>
                         @endif
                     </table>
+                </td>
+                <td style="width:50%;">
+                    <strong>Kepada Yth: {{ $transaction->customer->nama ?? '-' }}</strong><br>
+                    {{ $transaction->customer->alamat ?? '-' }}
                 </td>
             </tr>
         </table>
@@ -265,7 +265,7 @@ use Riskihajar\Terbilang\Facades\Terbilang;
             </table>
 
             <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
-                <div style="text-align:left; font-size:8.5pt; line-height:1.3;">
+                <div style="text-align:left; font-size:10pt; line-height:1.25;">
                     <strong>Pembayaran Transfer:</strong><br>
                     BCA 0202377881<br>
                     Novita Sari

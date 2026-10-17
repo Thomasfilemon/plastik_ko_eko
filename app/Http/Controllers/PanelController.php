@@ -95,6 +95,8 @@ class PanelController extends Controller
                 ->toArray();
         }
 
+        $lastHargaBeli = $this->lastHargaBeliMap($kodeList);
+
         // Manually group the panels
         $groupedPanels = [];
         foreach ($panels as $panel) {
@@ -102,8 +104,8 @@ class PanelController extends Controller
             $goodStock = $stock ? $stock->good_stock : 0;
             $unit = $stock ? $stock->satuan : 'PCS';
 
-            // cost is already per satuan dasar (updated on last pembelian)
-            $costPerUnit = (float) ($panel->cost ?? 0);
+            // Per satuan dasar, from the most recent pembelian by tanggal
+            $costPerUnit = (float) ($lastHargaBeli[$panel->kode_barang] ?? $panel->cost ?? 0);
             $hargaJual = isset($lastSoldHarga[$panel->kode_barang])
                 ? (float) $lastSoldHarga[$panel->kode_barang]
                 : (float) ($panel->harga_jual ?? $panel->price ?? 0);
@@ -165,31 +167,67 @@ class PanelController extends Controller
             abort(403, 'Access denied. Admins only.');
         }
 
-        $stockSub = DB::table('stocks')
+        $stockQty = DB::table('stocks')
             ->select('kode_barang', DB::raw('SUM(good_stock) as qty'))
-            ->groupBy('kode_barang');
+            ->groupBy('kode_barang')
+            ->pluck('qty', 'kode_barang');
 
-        $row = DB::table('kode_barangs as kb')
-            ->leftJoinSub($stockSub, 's', function ($join) {
-                $join->on('s.kode_barang', '=', 'kb.kode_barang');
-            })
-            ->selectRaw('
-                COALESCE(SUM(COALESCE(s.qty, 0) * COALESCE(kb.cost, 0)), 0) as total_nilai_beli,
-                COALESCE(SUM(COALESCE(s.qty, 0) * COALESCE(kb.harga_jual, 0)), 0) as total_nilai_jual,
-                COALESCE(SUM(COALESCE(s.qty, 0)), 0) as total_qty,
-                COUNT(kb.id) as total_sku,
-                SUM(CASE WHEN COALESCE(s.qty, 0) > 0 THEN 1 ELSE 0 END) as sku_berstok
-            ')
-            ->first();
+        $lastHargaBeli = $this->lastHargaBeliMap();
+
+        $totalNilaiBeli = 0;
+        $totalNilaiJual = 0;
+        $totalQty = 0;
+        $totalSku = 0;
+        $skuBerstok = 0;
+
+        foreach (KodeBarang::select('kode_barang', 'cost', 'harga_jual')->cursor() as $kb) {
+            $qty = (float) ($stockQty[$kb->kode_barang] ?? 0);
+            $hargaBeli = (float) ($lastHargaBeli[$kb->kode_barang] ?? $kb->cost ?? 0);
+
+            $totalNilaiBeli += $qty * $hargaBeli;
+            $totalNilaiJual += $qty * (float) ($kb->harga_jual ?? 0);
+            $totalQty += $qty;
+            $totalSku++;
+            if ($qty > 0) {
+                $skuBerstok++;
+            }
+        }
 
         return response()->json([
             'success' => true,
-            'total_nilai_beli' => (float) ($row->total_nilai_beli ?? 0),
-            'total_nilai_jual' => (float) ($row->total_nilai_jual ?? 0),
-            'total_qty' => (float) ($row->total_qty ?? 0),
-            'total_sku' => (int) ($row->total_sku ?? 0),
-            'sku_berstok' => (int) ($row->sku_berstok ?? 0),
+            'total_nilai_beli' => $totalNilaiBeli,
+            'total_nilai_jual' => $totalNilaiJual,
+            'total_qty' => $totalQty,
+            'total_sku' => $totalSku,
+            'sku_berstok' => $skuBerstok,
         ]);
+    }
+
+    /**
+     * Harga beli (per satuan dasar) from the latest non-canceled pembelian, keyed by kode_barang.
+     */
+    private function lastHargaBeliMap($kodeList = null): array
+    {
+        $rows = DB::table('pembelian_items as pi')
+            ->join('pembelian as p', 'p.nota', '=', 'pi.nota')
+            ->where(function ($q) {
+                $q->whereNull('p.status')->orWhere('p.status', '!=', 'canceled');
+            })
+            ->when($kodeList !== null, fn ($q) => $q->whereIn('pi.kode_barang', $kodeList))
+            ->orderBy('p.tanggal', 'desc')
+            ->orderBy('p.created_at', 'desc')
+            ->orderBy('pi.id', 'desc')
+            ->select('pi.kode_barang', 'pi.harga')
+            ->get();
+
+        $map = [];
+        foreach ($rows as $row) {
+            if (!array_key_exists($row->kode_barang, $map)) {
+                $map[$row->kode_barang] = (float) $row->harga;
+            }
+        }
+
+        return $map;
     }
 
 

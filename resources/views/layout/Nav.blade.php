@@ -774,7 +774,7 @@
                                 <a class="nav-link" href="{{ route('laporan.komisi-sales') }}"><i class="fas fa-percentage"></i> Laporan Komisi Sales</a>
                             </li>
                             <li class="nav-item">
-                                <a class="nav-link" href="{{ route('laporan.stok') }}"><i class="fas fa-warehouse"></i> Laporan Stok</a>
+                                <a class="nav-link" href="{{ route('stock.mutasi') }}"><i class="fas fa-warehouse"></i> Laporan Stok</a>
                             </li>
                             <li class="nav-item">
                                 <a class="nav-link" href="{{ route('laporan.piutang') }}"><i class="fas fa-credit-card"></i> Laporan Piutang Pelanggan</a>

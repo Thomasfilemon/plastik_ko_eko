@@ -154,7 +154,7 @@ use Riskihajar\Terbilang\Facades\Terbilang;
 <body>
 
 @php
-    $defaultCompany = \App\Models\Perusahaan::where('is_default', true)->first() ?? new \App\Models\Perusahaan();
+    $defaultCompany = \App\Models\Perusahaan::forNota();
     $itemsPerPage = 5; // <--- SET MAX ITEMS PER PAGE HERE
     $groupedItems = $purchase->items->chunk($itemsPerPage);
     $totalPages = $groupedItems->count();

@@ -30,4 +30,21 @@ class Perusahaan extends Model
     {
         return static::where('is_active', true)->first();
     }
+
+    /**
+     * Company shown in nota/surat jalan headers. Never returns an empty header.
+     */
+    public static function forNota(): self
+    {
+        return static::where('is_default', true)->first()
+            ?? static::first()
+            ?? new static([
+                'nama' => 'PLASINDOMART',
+                'alamat' => 'JL.IKAN DUYUNG NO 51 TELUK BETUNG SELATANG BANDAR LAMPUNG',
+                'kota' => 'LAMPUNG',
+                'kode_pos' => '35224',
+                'telepon' => '08117230286',
+                'fax' => '-',
+            ]);
+    }
 }

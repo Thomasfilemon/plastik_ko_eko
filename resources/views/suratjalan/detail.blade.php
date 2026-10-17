@@ -59,7 +59,7 @@
 </head>
 <body>
     @php
-        $defaultCompany = \App\Models\Perusahaan::where('is_default', true)->first() ?? new \App\Models\Perusahaan();
+        $defaultCompany = \App\Models\Perusahaan::forNota();
     @endphp
 
     <div class="no-print">

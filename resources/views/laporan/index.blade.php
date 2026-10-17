@@ -17,7 +17,7 @@
 			<a href="{{ route('laporan.komisi-sales') }}" class="list-group-item list-group-item-action">
 				Laporan Komisi Sales
 			</a>
-			<a href="{{ route('laporan.stok') }}" class="list-group-item list-group-item-action">
+			<a href="{{ route('stock.mutasi') }}" class="list-group-item list-group-item-action">
 				Laporan Stok
 			</a>
 			<a href="{{ route('laporan.piutang') }}" class="list-group-item list-group-item-action">

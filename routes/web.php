@@ -496,9 +496,13 @@ Route::middleware(['web', 'auth'])->group(function () {
     // ==============================
     
     // Stock Management routes
-    Route::group(['middleware' => ['permission:view stock'], 'prefix' => 'stock'], function () {
+    // Mutasi Stok doubles as Laporan Stok, so Laporan users can open it too
+    Route::group(['middleware' => ['permission:view stock|view laporan'], 'prefix' => 'stock'], function () {
         Route::get('/mutasi', [StockController::class, 'mutasiStock'])->name('stock.mutasi');
         Route::get('/print-good', [StockController::class, 'printGoodStock'])->name('stock.print.good');
+    });
+
+    Route::group(['middleware' => ['permission:view stock'], 'prefix' => 'stock'], function () {
         Route::get('/get', [StockController::class, 'getStock'])->name('stock.get');
         Route::get('/mutations', [StockController::class, 'getStockMutations'])->name('stock.mutations');
     });
@@ -734,7 +738,7 @@ Route::middleware(['web', 'auth'])->group(function () {
         Route::get('/komisi-sales/detail/{salesCode}', [LaporanController::class, 'komisiSalesDetail'])->name('laporan.komisi_sales.detail');
         Route::get('/komisi-sales/invoice-detail/{transaksiId}', [LaporanController::class, 'komisiSalesInvoiceDetail'])->name('laporan.komisi_sales.invoice_detail');
         Route::get('/komisi-sales', [LaporanController::class, 'komisiSales'])->name('laporan.komisi-sales');
-        Route::get('/stok', [LaporanController::class, 'laporanStok'])->name('laporan.stok');
+        Route::get('/stok', fn () => redirect()->route('stock.mutasi'))->name('laporan.stok');
         Route::get('/stok/pergerakan/{kodeBarang}', [LaporanController::class, 'detailPergerakanBarang'])->name('laporan.stok.pergerakan');
         Route::get('/piutang', [LaporanController::class, 'laporanPiutang'])->name('laporan.piutang');
         Route::get('/utang-supplier', [LaporanController::class, 'laporanUtangSupplier'])->name('laporan.utang-supplier');
