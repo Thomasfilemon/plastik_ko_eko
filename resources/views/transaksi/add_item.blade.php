@@ -346,7 +346,7 @@
                 $.ajax({
                     url: "{{ route('kodeBarang.search') }}",
                     method: "GET",
-                    data: { keyword },
+                    data: { keyword, active_only: 1 },
                     success: function(data) {
                         let dropdown = '';
                         if (data.length > 0) {

@@ -173,6 +173,19 @@ class TransaksiController extends Controller
         return view('transaksi.penjualan', compact('noTransaksi', 'kodeBarangs', 'salesOrder'));
     }
 
+    private function inactiveBarangNames($kodeList)
+    {
+        $kodeList = collect($kodeList)->filter()->unique()->values();
+        if ($kodeList->isEmpty()) {
+            return collect();
+        }
+
+        return KodeBarang::whereIn('kode_barang', $kodeList)
+            ->where('status', '!=', 'Active')
+            ->get(['kode_barang', 'name'])
+            ->map(fn ($kb) => "{$kb->kode_barang} - {$kb->name}");
+    }
+
     public function getByGroupId($group_id)
     {
         $panel = Panel::where('group_id', $group_id)->first();
@@ -202,6 +215,14 @@ class TransaksiController extends Controller
             'hari_tempo' => 'nullable|integer|min:0',
             'tanggal_jatuh_tempo' => 'nullable|date|after_or_equal:tanggal',
         ]);
+
+        $inactive = $this->inactiveBarangNames(collect($request->items)->pluck('kodeBarang'));
+        if ($inactive->isNotEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Barang sudah nonaktif, tidak bisa dijual: ' . $inactive->implode(', '),
+            ], 422);
+        }
         // dd($request);
         try {
             // =========================
@@ -452,6 +473,17 @@ class TransaksiController extends Controller
             'edit_reason' => 'required|string|max:255',
             'notes' => 'nullable|string',
         ]);
+
+        // Items already on this faktur may stay even if deactivated later; only block newly added ones
+        $existingKode = TransaksiItem::where('transaksi_id', $id)->pluck('kode_barang');
+        $newKode = collect($request->items)->pluck('kodeBarang')->diff($existingKode);
+        $inactive = $this->inactiveBarangNames($newKode);
+        if ($inactive->isNotEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Barang sudah nonaktif, tidak bisa ditambahkan: ' . $inactive->implode(', '),
+            ], 422);
+        }
         
         try {
             DB::beginTransaction();

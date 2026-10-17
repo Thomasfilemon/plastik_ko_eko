@@ -269,9 +269,12 @@ class KodeBarangController extends Controller
     {
         $keyword = $request->input('keyword');
 
-        $kodeBarang = KodeBarang::where('kode_barang', 'like', "%{$keyword}%")
-            ->orWhere('name', 'like', "%{$keyword}%")
-            ->orWhere('attribute', 'like', "%{$keyword}%")
+        $kodeBarang = KodeBarang::where(function ($q) use ($keyword) {
+                $q->where('kode_barang', 'like', "%{$keyword}%")
+                    ->orWhere('name', 'like', "%{$keyword}%")
+                    ->orWhere('attribute', 'like', "%{$keyword}%");
+            })
+            ->when($request->boolean('active_only'), fn ($q) => $q->active())
             ->limit(10)
             ->get();
 
