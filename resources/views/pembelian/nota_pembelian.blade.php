@@ -171,7 +171,7 @@ use Riskihajar\Terbilang\Facades\Terbilang;
     <div class="page">
         {{-- HEADER --}}
         <div class="header">
-            <strong>{{ $defaultCompany->nama ?? 'CV. ALUMKA CIPTA PRIMA' }}</strong><br>
+            <strong>{{ $defaultCompany->nama ?? 'PLASINDOMART' }}</strong><br>
             {{ $defaultCompany->alamat ?? 'JL. SINAR RAGA ABI HASAN NO.1553 RT.022 RW.008' }}<br>
             {{ $defaultCompany->kota ?? '8 ILIR' }}, {{ $defaultCompany->kode_pos ?? 'ILIR TIMUR II' }}<br>
             TELP. {{ $defaultCompany->telepon ?? '(0711) 311158' }} &nbsp;&nbsp; FAX {{ $defaultCompany->fax ?? '(0711) 311158' }}<br>

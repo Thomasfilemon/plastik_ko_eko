@@ -359,19 +359,25 @@ class ReturPenjualanController extends Controller
         try {
             DB::beginTransaction();
 
-            // Process each item - add stock back
+            // Process each item - add stock back at original FIFO modal (NOT harga jual)
+            $returPenjualan->loadMissing('items.transaksiItem.transaksiItemSumber');
             foreach ($returPenjualan->items as $item) {
                 // Get kode_barang ID from kode_barang string
                 $kodeBarang = KodeBarang::where('kode_barang', $item->kode_barang)->first();
                 if (!$kodeBarang) {
                     throw new \Exception("Kode barang {$item->kode_barang} tidak ditemukan");
                 }
+
+                $hargaModal = $this->fifoService->resolveHargaModalFromTransaksiItem(
+                    $item->transaksiItem,
+                    $kodeBarang
+                );
                 
                 // Add stock back using FIFO service
                 $this->fifoService->addStock(
                     $kodeBarang->id,
                     $item->qty_retur,
-                    $item->harga,
+                    $hargaModal,
                     "Retur Penjualan {$returPenjualan->no_retur}"
                 );
             }

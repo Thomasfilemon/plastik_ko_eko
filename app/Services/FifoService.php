@@ -193,11 +193,44 @@ class FifoService
     }
 
     /**
+     * Weighted-average FIFO cost from the original sale line.
+     * Used when stock returns so the new batch keeps modal, not harga jual.
+     */
+    public function resolveHargaModalFromTransaksiItem(?\App\Models\TransaksiItem $transaksiItem, ?\App\Models\KodeBarang $kodeBarang = null): float
+    {
+        if ($transaksiItem) {
+            $sumber = $transaksiItem->relationLoaded('transaksiItemSumber')
+                ? $transaksiItem->transaksiItemSumber
+                : $transaksiItem->transaksiItemSumber()->get();
+
+            $qtyTotal = (float) $sumber->sum('qty_diambil');
+            if ($qtyTotal > 0) {
+                $modalTotal = (float) $sumber->sum(function ($s) {
+                    return (float) $s->qty_diambil * (float) $s->harga_modal;
+                });
+                if ($modalTotal > 0) {
+                    return $modalTotal / $qtyTotal;
+                }
+            }
+        }
+
+        if ($kodeBarang) {
+            $avg = $this->hitungRataRataHargaModal($kodeBarang->id);
+            if ($avg > 0) {
+                return $avg;
+            }
+            return (float) ($kodeBarang->cost ?? 0);
+        }
+
+        return 0.0;
+    }
+
+    /**
      * Tambah stok untuk return barang dari penjualan
      * 
      * @param int $kodeBarangId
      * @param float $qty
-     * @param float $harga
+     * @param float $harga  Must be FIFO modal / cost, NOT harga jual
      * @param string $keterangan
      * @param string $customerId
      * @return bool

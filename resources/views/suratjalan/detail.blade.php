@@ -69,7 +69,7 @@
 
     <div class="page">
         <div class="header">
-            <strong>{{ $defaultCompany->nama ?? 'CV. ALUMKA CIPTA PRIMA' }}</strong><br>
+            <strong>{{ $defaultCompany->nama ?? 'PLASINDOMART' }}</strong><br>
             {{ $defaultCompany->alamat ?? 'JL. SINAR RAGA ABI HASAN NO.1553 RT.022 RW.008' }}<br>
             {{ $defaultCompany->kota ?? '8 ILIR' }}, {{ $defaultCompany->kode_pos ?? 'ILIR TIMUR II' }}<br>
             TELP. {{ $defaultCompany->telepon ?? '(0711) 311158' }} &nbsp;&nbsp; FAX {{ $defaultCompany->fax ?? '(0711) 311158' }}<br>
@@ -142,7 +142,7 @@
         <div class="notes-section">
             <strong>Catatan:</strong><br>
             Mohon periksa barang sebelum menandatangani. Kerusakan setelah tanda tangan bukan tanggung jawab pengirim.<br>
-            Barang masih titipan dari {{ $defaultCompany->nama ?? 'CV. Alumka Cipta Prima' }}, bila belum dilunasi.
+            Barang masih titipan dari {{ $defaultCompany->nama ?? 'Plasindomart' }}, bila belum dilunasi.
         </div>
         <table class="signature-table">
             <tr>

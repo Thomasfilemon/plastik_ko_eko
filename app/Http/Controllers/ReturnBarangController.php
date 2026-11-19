@@ -360,11 +360,15 @@ class ReturnBarangController extends Controller
                 }
 
                 if ($returnBarang->tipe_return === 'penjualan') {
-                    // Return barang dari penjualan = tambah stok
+                    // Return barang dari penjualan = tambah stok at FIFO modal (NOT harga jual)
+                    $hargaModal = $this->fifoService->resolveHargaModalFromTransaksiItem(
+                        $transaksiItem,
+                        $kodeBarang
+                    );
                     $this->fifoService->addStock(
                         $kodeBarang->id,
                         $item->qty_return,
-                        $item->harga,
+                        $hargaModal,
                         "Return dari {$returnBarang->no_return}",
                         $returnBarang->kode_customer
                     );
